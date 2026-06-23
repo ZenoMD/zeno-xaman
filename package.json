@@ -5,7 +5,7 @@
   "source": "src/index.html",
   "scripts": {
     "start": "parcel",
-    "build": "parcel build"
+    "build": "parcel build --no-optimize --no-scope-hoist"
   },
   "dependencies": {
     "@railgun-community/wallet": "^10.9.0",

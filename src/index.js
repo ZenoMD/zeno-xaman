@@ -32,11 +32,11 @@ async function main() {
   log('boot: script running');
 
   // On-device persistence: SQLite in a Worker, stored in OPFS (SAH-pool VFS).
-  // This is cleared when XAMAN is closed
+  // This is cleared when XAMAN is closed but survives reloads of the page/xApp
   log('opening SQLite worker…');
   const kv = new SqliteKV(log);
 
-  // The worker bundle is large so it can take ~10s+ to download/parse over a tunnel on mobile; give init plenty of room.
+  // The worker bundle is large so it can take a while to load and initialize the SQLite WASM. Wait up to 90s for it to be ready.
   await withTimeout(kv.ready, 90000, 'SQLite init');
   log('SQLite ready');
 
