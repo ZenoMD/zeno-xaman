@@ -1,0 +1,53 @@
+# Builds the Parcel bundle and deploys it to Cloudflare Pages with Wrangler.
+#
+# Required CI/CD variables (Settings → CI/CD → Variables), both "Masked":
+#   CLOUDFLARE_API_TOKEN   – token with the "Cloudflare Pages: Edit" permission
+#   CLOUDFLARE_ACCOUNT_ID  – your Cloudflare account ID
+#
+# The Pages project name defaults to "zeno-xaman"; override via CF_PAGES_PROJECT.
+
+stages:
+  - build
+  - deploy
+
+default:
+  image: node:20
+
+variables:
+  CF_PAGES_PROJECT: zeno-xaman
+
+# Speed up installs by caching the npm download cache, keyed on the lockfile.
+cache:
+  key:
+    files:
+      - package-lock.json
+  paths:
+    - .npm/
+
+build:
+  stage: build
+  script:
+    - npm ci --cache .npm --prefer-offline
+    # Parcel caches into .parcel-cache; a stale cache across versions can break builds.
+    - rm -rf dist .parcel-cache
+    - npm run build
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 1 week
+
+deploy:
+  stage: deploy
+  needs:
+    - build
+  script:
+    - npm ci --cache .npm --prefer-offline
+    - >-
+      npx wrangler pages deploy dist
+      --project-name "$CF_PAGES_PROJECT"
+      --branch "$CI_COMMIT_REF_NAME"
+  environment:
+    name: cloudflare-pages
+  rules:
+    # Production deploy only from the default branch; other branches build but don't deploy.
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
