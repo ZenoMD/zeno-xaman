@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zeno Wallet</title>
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <h1>Zeno Wallet</h1>
+    <p id="status">Loading…</p>
+    <pre id="early" style="text-align:left;white-space:pre-wrap;word-break:break-word;font-size:12px;color:#fff"></pre>
+      <script>
+      // Runs before the bundle. Catches module load / parse / resolution errors
+      // that would otherwise be invisible (white screen, no console).
+      (function () {
+        var early = document.getElementById('early');
+        function show(msg) { early.textContent += msg + '\n'; }
+        window.addEventListener('error', function (e) {
+          show('error: ' + (e.message || '') + (e.filename ? ' @ ' + e.filename + ':' + e.lineno : ''));
+        });
+        window.addEventListener('unhandledrejection', function (e) {
+          show('rejection: ' + ((e.reason && e.reason.message) || e.reason));
+        });
+        show('loading modules…');
+      })();
+    </script>
+    <script type="module" src="index.js"></script>
+  </body>
+</html>
