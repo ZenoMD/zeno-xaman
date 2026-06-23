@@ -5,7 +5,7 @@ import { SqliteLevelDown } from "./sqlite/leveldown.js";
 import { createSqliteArtifactStore } from "./artifact-store.js";
 import { Xumm } from "xumm";
 
-const XUMM_API_KEY = "734f1a01-833f-4a67-9bcf-f3579ae4bd4a";
+const XUMM_API_KEY = "77350a9a-19d6-4b99-a5e0-feca3c60be07";
 
 const NETWORK = NetworkName.EthereumSepolia;
 const DEMO_MNEMONIC =
