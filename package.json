@@ -11,7 +11,7 @@
     "@railgun-community/wallet": "^10.9.0",
     "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
     "snarkjs": "^0.7.6",
-    "xumm-sdk": "^1.11.2"
+    "xumm": "^1.8.0"
   },
   "devDependencies": {
     "assert": "^2.1.0",
