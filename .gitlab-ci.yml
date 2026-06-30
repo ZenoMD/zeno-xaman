@@ -25,8 +25,6 @@ build:
       - .bun-cache/
   script:
     - bun install --frozen-lockfile
-    # `bun run build` runs the prebuild copy-wasm step, then `next build`, which
-    # statically exports the site to out/ (output: "export").
     - bun run build
   variables:
     BUN_INSTALL_CACHE_DIR: .bun-cache

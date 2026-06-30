@@ -1,0 +1,11 @@
+# Cloudflare Pages configuration.
+#
+# The Pages project builds this repo directly from Git (Cloudflare-hosted build,
+# not the GitLab CI wrangler job). Without this file the project falls back to
+# its dashboard "Build output directory" setting, which defaults to "dist" and
+# fails because Next.js (output: "export") emits the static site to "out/".
+#
+# Cloudflare reads pages_build_output_dir from here and publishes that directory.
+name = "zeno-xaman"
+pages_build_output_dir = "out"
+compatibility_date = "2026-06-30"
