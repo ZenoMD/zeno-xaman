@@ -4,8 +4,6 @@ import { useEffect, useState } from "react";
 
 const TABS = [
   { id: "shield", label: "Shield" },
-  { id: "transfer", label: "Transfer" },
-  { id: "unshield", label: "Unshield" },
 ];
 
 export function WalletTabs({ api }) {
@@ -29,8 +27,6 @@ export function WalletTabs({ api }) {
 
       <div className="tabs__panel" role="tabpanel">
         {tab === "shield" && <ShieldPanel api={api} />}
-        {tab === "transfer" && <TransferPanel api={api} />}
-        {tab === "unshield" && <UnshieldPanel api={api} />}
       </div>
     </div>
   );
@@ -74,43 +70,11 @@ function ShieldPanel({ api }) {
   );
 }
 
-function TransferPanel({ api }) {
-  const { loading, tokens, error } = useAssetList(() => api.getShieldedTokens(), [api]);
-  return (
-    <AssetForm
-      loading={loading}
-      error={error}
-      tokens={tokens}
-      emptyHint="No shielded tokens to transfer."
-      recipient={{ label: "Recipient (0zk address)", placeholder: "0zk1qy…" }}
-      action="Transfer"
-      busyLabel="Transferring…"
-      onSubmit={api.transfer}
-    />
-  );
-}
-
-function UnshieldPanel({ api }) {
-  const { loading, tokens, error } = useAssetList(() => api.getShieldedTokens(), [api]);
-  return (
-    <AssetForm
-      loading={loading}
-      error={error}
-      tokens={tokens}
-      emptyHint="No shielded tokens to unshield."
-      action="Unshield"
-      busyLabel="Unshielding…"
-      onSubmit={api.unshield}
-    />
-  );
-}
-
-// Shared token + amount form. `recipient` (optional) adds a destination field;
-// `onSubmit` receives { token, tokenId, amount, to? } and resolves to { txid }.
-function AssetForm({ loading, error, tokens, emptyHint, recipient, action, busyLabel, onSubmit }) {
+// Shared token + amount form. `onSubmit` receives { token, tokenId, amount }
+// and resolves to { txid }.
+function AssetForm({ loading, error, tokens, emptyHint, action, busyLabel, onSubmit }) {
   const [tokenId, setTokenId] = useState("");
   const [amount, setAmount] = useState("");
-  const [to, setTo] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
 
@@ -125,8 +89,7 @@ function AssetForm({ loading, error, tokens, emptyHint, recipient, action, busyL
 
   const selected = tokens.find((t) => t.id === tokenId);
   const amountOk = Number(amount) > 0 && Number(amount) <= Number(selected?.balance ?? 0);
-  const recipientOk = !recipient || to.trim().length > 0;
-  const canSubmit = selected && amountOk && recipientOk && !busy;
+  const canSubmit = selected && amountOk && !busy;
 
   const submit = async (e) => {
     e.preventDefault();
@@ -138,11 +101,9 @@ function AssetForm({ loading, error, tokens, emptyHint, recipient, action, busyL
         token: selected.currency,
         tokenId: selected.id,
         amount,
-        ...(recipient ? { to: to.trim() } : {}),
       });
       setResult({ ok: true, txid: res?.txid });
       setAmount("");
-      if (recipient) setTo("");
     } catch (err) {
       setResult({ ok: false, message: err.message || String(err) });
     } finally {
@@ -152,20 +113,6 @@ function AssetForm({ loading, error, tokens, emptyHint, recipient, action, busyL
 
   return (
     <form className="panel" onSubmit={submit}>
-      {recipient && (
-        <label className="field">
-          <span className="field__label">{recipient.label}</span>
-          <input
-            className="field__input"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            placeholder={recipient.placeholder}
-            spellCheck={false}
-            autoComplete="off"
-          />
-        </label>
-      )}
-
       <label className="field">
         <span className="field__label">Token</span>
         <select
