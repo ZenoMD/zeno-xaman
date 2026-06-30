@@ -151,6 +151,126 @@ body {
   cursor: default;
 }
 
+/* Tabs */
+.tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tabs__bar {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.tabs__tab {
+  appearance: none;
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 8px;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.tabs__tab--active {
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+/* Forms */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.panel__hint {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.panel__hint--error,
+.panel__result--error {
+  color: var(--red);
+}
+
+.panel__result {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--green);
+  word-break: break-all;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.field__input {
+  appearance: none;
+  width: 100%;
+  font-family: inherit;
+  font-size: 15px;
+  color: var(--fg);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.field__input:focus {
+  outline: none;
+  border-color: var(--brand);
+}
+
+.field__amount {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.field__amount .field__input {
+  flex: 1;
+}
+
+.field__max {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--brand);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0 14px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.field__hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .status {
   margin: 0;
   font-size: 13px;

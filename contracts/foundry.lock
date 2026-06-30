@@ -1,0 +1,38 @@
+{
+  "contracts/lib/forge-std": {
+    "rev": "620536fa5277db4e3fd46772d5cbc1ea0696fb43"
+  },
+  "contracts/lib/interchain-token-service": {
+    "rev": "51cc72ca925441aa262b4a6c2392f7872c407b18"
+  },
+  "lib/contract": {
+    "rev": "9ec09123eb140fdaaf3a5ff1f29d634c353630cd"
+  },
+  "lib/forge-std": {
+    "tag": {
+      "name": "v1.16.1",
+      "rev": "620536fa5277db4e3fd46772d5cbc1ea0696fb43"
+    }
+  },
+  "lib/interchain-token-service": {
+    "tag": {
+      "name": "v2.2.0",
+      "rev": "51cc72ca925441aa262b4a6c2392f7872c407b18"
+    }
+  },
+  "lib/openzeppelin-contracts": {
+    "tag": {
+      "name": "v4.8.1",
+      "rev": "0457042d93d9dfd760dbaa06a4d2f1216fdbe297"
+    }
+  },
+  "lib/openzeppelin-contracts-upgradeable": {
+    "tag": {
+      "name": "v4.8.1",
+      "rev": "7ec6d2a3117eb3487a5f9029203e80ceb89bd984"
+    }
+  },
+  "lib/railgun-contracts": {
+    "rev": "9ec09123eb140fdaaf3a5ff1f29d634c353630cd"
+  }
+}

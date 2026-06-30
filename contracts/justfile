@@ -1,0 +1,37 @@
+# AxelarPoolRouter deployment — XRPL EVM sidechain.
+#
+# Requires `forge` (Foundry) and a funded deployer key:
+#   export PRIVATE_KEY=0x...
+#   just deploy
+
+# XRPL EVM mainnet RPC + chain.
+rpc := env_var_or_default("RPC_URL", "https://rpc.xrplevm.org")
+
+# Axelar InterchainTokenService on XRPL EVM mainnet
+# (axelar-chains-config mainnet.json -> chains.xrpl-evm.contracts.InterchainTokenService).
+its := env_var_or_default("ITS_ADDRESS", "0xB5FB4BE02232B1bBA4dC8f81dc24C26980dE9e3C")
+
+# RailgunSmartWallet pool PROXY (never the implementation) — must match
+# NETWORK_CONFIG.proxyContract in lib/railgun.js so the wallet scanner sees the shields.
+pool := env_var_or_default("POOL_ADDRESS", "0x83f2630F50eF954927e97E2246b4F7dCEa8c02EA")
+
+# Optional Blockscout verifier URL; set to enable --verify on deploy.
+verifier_url := env_var_or_default("VERIFIER_URL", "")
+
+default:
+    @just --list
+
+# Compile the contracts.
+build:
+    forge build
+
+# Deploy AxelarPoolRouter(its, pool) to the sidechain. Reads PRIVATE_KEY from env.
+deploy:
+    @test -n "${PRIVATE_KEY:-}" || (echo "set PRIVATE_KEY in your environment" && exit 1)
+    forge create \
+        src/AxelarPoolRouter.sol:AxelarPoolRouter \
+        --rpc-url {{rpc}} \
+        --private-key "${PRIVATE_KEY}" \
+        --broadcast \
+        {{ if verifier_url != "" { "--verify --verifier blockscout --verifier-url " + verifier_url } else { "" } }} \
+        --constructor-args {{its}} {{pool}}
