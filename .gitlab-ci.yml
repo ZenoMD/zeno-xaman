@@ -1,4 +1,4 @@
-# Builds the Parcel bundle and deploys it to Cloudflare Pages with Wrangler.
+# Builds the Next.js static export and deploys it to Cloudflare Pages with Wrangler.
 #
 # Required CI/CD variables (Settings → CI/CD → Variables), both "Masked":
 #   CLOUDFLARE_API_TOKEN   – token with the "Cloudflare Pages: Edit" permission
@@ -10,40 +10,39 @@ stages:
   - build
   - deploy
 
-default:
-  image: node:20
-
 variables:
   CF_PAGES_PROJECT: zeno-xaman
 
-# Speed up installs by caching the npm download cache, keyed on the lockfile.
-cache:
-  key:
-    files:
-      - package-lock.json
-  paths:
-    - .npm/
-
 build:
   stage: build
+  image: oven/bun:1
+  # Cache Bun's global module cache, keyed on the lockfile.
+  cache:
+    key:
+      files:
+        - bun.lock
+    paths:
+      - .bun-cache/
   script:
-    - npm ci --cache .npm --prefer-offline
-    # Parcel caches into .parcel-cache; a stale cache across versions can break builds.
-    - rm -rf dist .parcel-cache
-    - npm run build
+    - bun install --frozen-lockfile
+    # `bun run build` runs the prebuild copy-wasm step, then `next build`, which
+    # statically exports the site to out/ (output: "export").
+    - bun run build
+  variables:
+    BUN_INSTALL_CACHE_DIR: .bun-cache
   artifacts:
     paths:
-      - dist/
+      - out/
     expire_in: 1 week
 
 deploy:
   stage: deploy
+  image: node:20
   needs:
     - build
   script:
-    - npm ci --cache .npm --prefer-offline
     - >-
-      npx wrangler pages deploy dist
+      npx --yes wrangler pages deploy out
       --project-name "$CF_PAGES_PROJECT"
       --branch "$CI_COMMIT_REF_NAME"
   environment:
