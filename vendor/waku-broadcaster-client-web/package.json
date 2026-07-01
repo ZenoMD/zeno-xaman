@@ -1,0 +1,22 @@
+{
+  "name": "@railgun-community/waku-broadcaster-client-web",
+  "version": "9.1.1-xrpl",
+  "description": "Vendored build of the RAILGUN waku-broadcaster-client web package, forked to allow a custom contentTopicApp (see README). Only the built dist is committed; regenerate with `bun run vendor-broadcaster`.",
+  "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "dependencies": {
+    "@waku/discovery": "^0.0.13",
+    "@waku/sdk": "^0.0.36"
+  },
+  "peerDependencies": {
+    "@railgun-community/shared-models": "^8.0.1",
+    "@railgun-community/wallet": "^10.9.0",
+    "ethers": "^6.14.3"
+  }
+}

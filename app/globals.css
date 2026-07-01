@@ -225,6 +225,13 @@ body {
   color: var(--muted);
 }
 
+.field__label--inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
 .field__input {
   appearance: none;
   width: 100%;

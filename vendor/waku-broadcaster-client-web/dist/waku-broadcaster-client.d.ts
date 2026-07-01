@@ -1,0 +1,36 @@
+import { Chain, SelectedBroadcaster } from '@railgun-community/shared-models';
+import { BroadcasterConnectionStatusCallback, BroadcasterDebugger, BroadcasterOptions } from './models/export-models.js';
+import type { LightNode } from '@waku/sdk';
+export declare class WakuBroadcasterClient {
+    private static chain;
+    private static statusCallback;
+    private static started;
+    private static isRestarting;
+    static pollDelay: number;
+    static start(chain: Chain, broadcasterOptions: BroadcasterOptions, statusCallback: BroadcasterConnectionStatusCallback, broadcasterDebugger?: BroadcasterDebugger): Promise<void>;
+    static stop(): Promise<void>;
+    static isStarted(): boolean;
+    static setHealthcheckLoggingEnabled(enabled: boolean): void;
+    static setChain(chain: Chain): Promise<void>;
+    static getContentTopics(): string[];
+    static getMeshPeerCount(): number;
+    static getPubSubPeerCount(): number;
+    static getLightPushPeerCount(): Promise<number>;
+    static getFilterPeerCount(): Promise<number>;
+    static findBestBroadcaster(chain: Chain, tokenAddress: string, useRelayAdapt: boolean): Optional<SelectedBroadcaster>;
+    static findAllBroadcastersForChain(chain: Chain, useRelayAdapt: boolean): Optional<SelectedBroadcaster[]>;
+    static findRandomBroadcasterForToken(chain: Chain, tokenAddress: string, useRelayAdapt: boolean, percentageThreshold?: number): Optional<SelectedBroadcaster>;
+    static findBroadcastersForToken(chain: Chain, tokenAddress: string, useRelayAdapt: boolean): Optional<SelectedBroadcaster[]>;
+    static setAddressFilters(allowlist: Optional<string[]>, blocklist: Optional<string[]>): void;
+    static tryReconnect(): Promise<void>;
+    static supportsToken(chain: Chain, tokenAddress: string, useRelayAdapt: boolean): boolean;
+    private static restart;
+    private static pollStatus;
+    private static updateStatus;
+    private static formatHealthcheckLog;
+    private static logHealthcheck;
+    static addTransportSubscription(waku: Optional<LightNode>, topic: string, callback: (message: any) => void): Promise<void>;
+    static sendTransport(data: object, topic: string): Promise<void>;
+    static getWakuCore(): Optional<LightNode>;
+    static setRestartCallback(callback: () => void): void;
+}

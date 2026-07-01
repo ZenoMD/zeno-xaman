@@ -1,3 +1,5 @@
+const path = require("path");
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // The xApp is entirely client-side and is deployed to Cloudflare Pages as a
@@ -9,6 +11,22 @@ const nextConfig = {
   reactStrictMode: false,
 
   webpack: (config, { webpack, isServer }) => {
+    // Swap @railgun-community/wallet's internal utils/gas-price.js (a hardcoded
+    // network switch that throws "Undefined networkName" for our custom XRPL_EVM
+    // network on broadcaster transactions) for our shim, which adds the XRPL_EVM
+    // case. Scoped to the wallet package's own import so nothing else is touched.
+    config.plugins.push(
+      new webpack.NormalModuleReplacementPlugin(
+        /utils[\\/]gas-price(\.js)?$/,
+        (resource) => {
+          const from = (resource.context || "").replace(/\\/g, "/");
+          if (from.includes("@railgun-community/wallet/dist")) {
+            resource.request = path.resolve(__dirname, "lib/railgun-gas-price-shim.js");
+          }
+        },
+      ),
+    );
+
     // RAILGUN + snarkjs were written for Node, so polyfill the core modules they
     // reach for when bundled into the browser/worker (Parcel did this implicitly).
     if (!isServer) {

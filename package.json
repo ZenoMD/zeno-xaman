@@ -10,6 +10,7 @@
     "build": "next build"
   },
   "dependencies": {
+    "@railgun-community/waku-broadcaster-client-web": "file:./vendor/waku-broadcaster-client-web",
     "@railgun-community/wallet": "^10.9.0",
     "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
     "ethers": "^6.14.3",
