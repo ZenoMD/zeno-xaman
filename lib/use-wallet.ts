@@ -3,6 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import type { WalletApi } from "./types";
 
+/**
+ * Scan phase for the shielded balance:
+ * - `idle`: wallet not booted yet (loading modules / awaiting sign-in)
+ * - `scanning`: merkletree sync in progress
+ * - `complete`: fully synced, balance is trustworthy
+ */
+export type ScanState = "idle" | "scanning" | "complete";
+
 export type UseWalletState = {
   /** latest one-line progress/status message */
   status: string;
@@ -12,6 +20,8 @@ export type UseWalletState = {
   address: string | null;
   /** formatted shielded WETH balance */
   balance: string;
+  /** shielded balance scan phase (drives the dashed balance / "Scanning…") */
+  scanState: ScanState;
   /** fatal boot error, if any */
   error: Error | null;
   /** wallet controller (tab actions), once booted */
@@ -28,6 +38,7 @@ export function useWallet(): UseWalletState {
   const [status, setStatus] = useState("Loading…");
   const [logs, setLogs] = useState<string[]>(["loading modules…"]);
   const [balance, setBalance] = useState("—");
+  const [scanState, setScanState] = useState<ScanState>("idle");
   const [address, setAddress] = useState<string | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [api, setApi] = useState<WalletApi | null>(null);
@@ -65,7 +76,12 @@ export function useWallet(): UseWalletState {
     let cancelled = false;
     import("./wallet")
       .then(({ startWallet }) =>
-        startWallet({ log, onAddress: setAddress, onBalance: setBalance }),
+        startWallet({
+          log,
+          onAddress: setAddress,
+          onBalance: setBalance,
+          onScanState: setScanState,
+        }),
       )
       .then((controller) => {
         // If the effect already tore down before boot finished, stop right away.
@@ -91,5 +107,5 @@ export function useWallet(): UseWalletState {
     };
   }, []);
 
-  return { status, logs, balance, address, error, api };
+  return { status, logs, balance, scanState, address, error, api };
 }

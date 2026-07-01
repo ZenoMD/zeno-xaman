@@ -125,12 +125,66 @@ body {
   color: var(--muted);
 }
 
+.balance-card__scanning {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.balance-card__scanning::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--brand);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .balance-card__address {
   margin: 12px 0 0;
   font-size: 13px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: var(--muted);
   word-break: break-all;
+}
+
+button.balance-card__address {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
+
+.balance-card__copy {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+button.balance-card__address:hover .balance-card__copy {
+  color: var(--brand);
+}
+
+button.balance-card__address:active {
+  opacity: 0.7;
 }
 
 .btn {
@@ -275,6 +329,127 @@ body {
 
 .field__hint {
   font-size: 12px;
+  color: var(--muted);
+}
+
+/* Swap-style token + amount card (Shield tab), inspired by Xaman Swap. */
+.asset-card {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+}
+
+.asset-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.asset-card__label {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--fg);
+}
+
+.asset-card__token {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+  cursor: pointer;
+}
+
+/* Native picker sits invisibly over the whole pill so a tap anywhere opens it. */
+.asset-card__select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  border: none;
+  appearance: none;
+  cursor: pointer;
+}
+
+.asset-card__token-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--fg);
+}
+
+.asset-card__chevron {
+  color: var(--muted);
+  flex: none;
+}
+
+.asset-card__bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.asset-card__amount {
+  appearance: none;
+  width: 100%;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.asset-card__amount:focus {
+  outline: none;
+}
+
+.asset-card__amount::placeholder {
+  color: var(--muted);
+  opacity: 0.5;
+}
+
+/* Strip the number-input spinners. */
+.asset-card__amount::-webkit-outer-spin-button,
+.asset-card__amount::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.asset-card__meta {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.asset-card__max {
+  appearance: none;
+  border: none;
+  background: var(--brand);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 7px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.asset-card__balance {
+  font-size: 13px;
   color: var(--muted);
 }
 

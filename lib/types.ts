@@ -29,6 +29,8 @@ export type ShieldParams = {
 export type TransferParams = {
   recipientAddress: string;
   amount: string;
+  /** shielded ERC20 to send (EVM address). */
+  tokenAddress: string;
   memoText?: string;
 };
 
@@ -37,6 +39,8 @@ export type WalletApi = {
   railgunAddress: string;
   network: string;
   getXrplTokens: () => Promise<XrplTokens>;
+  /** Shielded (in-pool) balances available to transfer, as pickable tokens. */
+  getShieldedTokens: () => Promise<XrplToken[]>;
   shield: (params: ShieldParams) => Promise<{ txid: string }>;
   transfer: (params: TransferParams) => Promise<{ txHash: string }>;
   stop: () => void;

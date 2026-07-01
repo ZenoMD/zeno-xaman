@@ -11,6 +11,19 @@ const nextConfig = {
   reactStrictMode: false,
 
   webpack: (config, { webpack, isServer }) => {
+    // Import .svg files as React components (via SVGR) so icons live in their
+    // own .svg files instead of inline JSX. Next's built-in loader would treat
+    // them as static-image URLs, so exclude .svg from it and hand them to SVGR.
+    const fileLoaderRule = config.module.rules.find((rule) =>
+      rule.test?.test?.(".svg"),
+    );
+    if (fileLoaderRule) fileLoaderRule.exclude = /\.svg$/i;
+    config.module.rules.push({
+      test: /\.svg$/i,
+      issuer: /\.[jt]sx?$/,
+      use: ["@svgr/webpack"],
+    });
+
     // Swap @railgun-community/wallet's internal utils/gas-price.js (a hardcoded
     // network switch that throws "Undefined networkName" for our custom XRPL_EVM
     // network on broadcaster transactions) for our shim, which adds the XRPL_EVM

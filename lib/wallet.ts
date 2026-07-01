@@ -1,6 +1,7 @@
 import {
   initRailgun,
   getShieldedBalance,
+  getShieldedTokens as getRawShieldedTokens,
   WETH_ADDRESS,
   XRPL_EVM_NETWORK,
 } from "./railgun";
@@ -16,6 +17,13 @@ import { Mnemonic, sha256, formatEther, parseEther } from "ethers";
 import type { LogFn, ShieldParams, TransferParams, WalletApi } from "./types";
 
 const NETWORK = XRPL_EVM_NETWORK;
+
+// Human label for a shielded ERC20 address. The wrapped-native token is the
+// pool's XRP; anything else falls back to a shortened address.
+const shieldedTokenSymbol = (tokenAddress: string, networkName: string): string =>
+  tokenAddress.toLowerCase() === WETH_ADDRESS[networkName]?.toLowerCase()
+    ? "XRP"
+    : `${tokenAddress.slice(0, 6)}…${tokenAddress.slice(-4)}`;
 
 const withTimeout = <T>(
   promise: Promise<T>,
@@ -39,6 +47,8 @@ export type StartWalletCallbacks = {
   onAddress: (addr: string) => void;
   /** formatted WETH balance */
   onBalance: (balance: string) => void;
+  /** shielded UTXO merkletree scan phase, once scanning actually begins */
+  onScanState: (state: "scanning" | "complete") => void;
 };
 
 /**
@@ -50,6 +60,7 @@ export async function startWallet({
   log,
   onAddress,
   onBalance,
+  onScanState,
 }: StartWalletCallbacks): Promise<WalletApi> {
   log("Deriving shielded account…");
   const { mnemonic, encryptionKey } = await deriveShieldedAccount(log);
@@ -67,22 +78,41 @@ export async function startWallet({
   const db = new SqliteLevelDown(kv, "engine");
   const artifactStore = createSqliteArtifactStore(kv);
 
+  // Push the latest shielded XRP balance to the UI.
+  const render = () => {
+    const wei = getShieldedBalance(WETH_ADDRESS[NETWORK]);
+    onBalance(Number(formatEther(wei)).toFixed(4));
+  };
+
+  // Only reveal the balance once it's actually been computed (the balance-update
+  // callback, which fires *after* the merkletree scan completes). Reporting scan-
+  // complete earlier would briefly show a stale 0.00. Until then we stay in the
+  // "scanning" state so the UI keeps a dashed balance.
+  let balancesReady = false;
+
   const { wallet, networkName } = await initRailgun(
     db,
     artifactStore,
-    { mnemonic, encryptionKey, networkName: NETWORK },
+    {
+      mnemonic,
+      encryptionKey,
+      networkName: NETWORK,
+      onScanUpdate: () => {
+        if (!balancesReady) onScanState("scanning");
+      },
+      onBalanceUpdate: () => {
+        balancesReady = true;
+        render();
+        onScanState("complete");
+      },
+    },
     log,
   );
 
   onAddress(wallet.railgunAddress);
 
-  // The scan runs in the background, so the balance fills in (and updates) over
-  // the session rather than being known up front — poll the latest value.
-  const render = () => {
-    const wei = getShieldedBalance(WETH_ADDRESS[networkName]);
-    onBalance(Number(formatEther(wei)).toFixed(4));
-  };
   render();
+  // Fallback refresh in case a later balance change lands without re-firing.
   const timer = setInterval(render, 3000);
 
   log(`RAILGUN ready on ${networkName}`);
@@ -115,14 +145,19 @@ export async function startWallet({
   // Private transfer: move shielded funds to another 0zk address via a RAILGUN
   // broadcaster (the proof is too large for an XRPL memo, so it goes over Waku
   // rather than Axelar). Funds stay in the pool; the broadcaster pays EVM gas.
-  const transfer = ({ recipientAddress, amount, memoText }: TransferParams) =>
+  const transfer = ({
+    recipientAddress,
+    amount,
+    tokenAddress,
+    memoText,
+  }: TransferParams) =>
     transferViaBroadcaster(
       {
         networkName,
         railgunWalletID: wallet.id,
         encryptionKey,
         recipientAddress,
-        tokenAddress: WETH_ADDRESS[networkName],
+        tokenAddress,
         amount: parseEther(String(amount)),
         memoText,
       },
@@ -130,11 +165,27 @@ export async function startWallet({
       (pct) => log(`proof ${Math.round(pct * 100)}%`),
     );
 
+  // Snapshot the current shielded balances as pickable tokens for the Transfer
+  // tab. All shielded assets here are 18-decimal (native XRP is the only one
+  // today), so format with formatEther and label known addresses.
+  const getShieldedTokens = async () =>
+    getRawShieldedTokens().map(({ tokenAddress, amount }) => {
+      const symbol = shieldedTokenSymbol(tokenAddress, networkName);
+      return {
+        id: tokenAddress,
+        currency: symbol,
+        issuer: null,
+        balance: formatEther(amount),
+        label: symbol,
+      };
+    });
+
   return {
     railgunAddress: wallet.railgunAddress,
     network: networkName,
     // Real: the spendable assets in the connected XRPL wallet.
     getXrplTokens: () => fetchXrplTokens(),
+    getShieldedTokens,
     shield,
     transfer,
     stop: () => clearInterval(timer),

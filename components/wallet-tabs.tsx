@@ -7,6 +7,7 @@ import type {
   XrplToken,
   XrplTokens,
 } from "../lib/types";
+import ChevronIcon from "./icons/chevron-down.svg";
 
 type TabId = "shield" | "transfer";
 
@@ -100,89 +101,39 @@ function ShieldPanel({ api }: { api: WalletApi }) {
       emptyHint="No tokens found in your XRPL wallet."
       action="Shield"
       busyLabel="Shielding…"
-      allowRecipient
+      recipientMode="optional"
       onSubmit={api.shield}
     />
   );
 }
 
-// Private transfer: send shielded XRP to another 0zk address. Funds stay in the
-// pool, so this needs only a recipient 0zk address + amount (no token picker).
+// Private transfer: send a shielded balance to another 0zk address. Funds stay
+// in the pool (the broadcaster pays EVM gas). Pick which shielded token to send,
+// the amount, then the recipient's 0zk address — same card as Shield.
 function TransferPanel({ api }: { api: WalletApi }) {
-  const [recipient, setRecipient] = useState("");
-  const [amount, setAmount] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<Result>(null);
-
-  const recipientOk = recipient.startsWith("0zk") && recipient.length > 10;
-  const amountOk = Number(amount) > 0;
-  const canSubmit = recipientOk && amountOk && !busy;
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!canSubmit) return;
-    setBusy(true);
-    setResult(null);
-    try {
-      const res = await api.transfer({
-        recipientAddress: recipient.trim(),
-        amount,
-      });
-      setResult({ ok: true, txid: res?.txHash });
-      setAmount("");
-    } catch (err: unknown) {
-      setResult({ ok: false, message: (err as Error).message || String(err) });
-    } finally {
-      setBusy(false);
-    }
-  };
-
+  const { loading, tokens, error } = useAssetList(
+    () => api.getShieldedTokens(),
+    [api],
+  );
   return (
-    <form className="panel" onSubmit={submit}>
-      <label className="field">
-        <span className="field__label">Recipient (0zk address)</span>
-        <input
-          className="field__input"
-          type="text"
-          value={recipient}
-          onChange={(e) => setRecipient(e.target.value)}
-          placeholder="0zk…"
-          autoComplete="off"
-          autoCapitalize="off"
-          spellCheck={false}
-        />
-      </label>
-
-      <label className="field">
-        <span className="field__label">Amount</span>
-        <input
-          className="field__input"
-          type="number"
-          min="0"
-          step="any"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          placeholder="0.0"
-        />
-        <span className="field__hint">
-          Shielded XRP · stays private in the pool
-        </span>
-      </label>
-
-      <button type="submit" className="btn" disabled={!canSubmit}>
-        {busy ? "Proving & sending…" : "Transfer"}
-      </button>
-
-      {result && (
-        <p
-          className={`panel__result${result.ok ? "" : " panel__result--error"}`}
-        >
-          {result.ok
-            ? `✓ Transfer submitted${result.txid ? ` — ${result.txid.slice(0, 14)}…` : ""}`
-            : `✕ ${result.message}`}
-        </p>
-      )}
-    </form>
+    <AssetForm
+      loading={loading}
+      error={error}
+      tokens={tokens}
+      emptyHint="No shielded balance yet. Shield some funds first."
+      action="Transfer"
+      busyLabel="Proving & sending…"
+      recipientMode="required"
+      recipientHint="Recipient's 0zk address · stays private in the pool"
+      onSubmit={async ({ tokenId, amount, recipientAddress }) => {
+        const res = await api.transfer({
+          tokenAddress: tokenId,
+          amount,
+          recipientAddress: recipientAddress!,
+        });
+        return { txid: res.txHash };
+      }}
+    />
   );
 }
 
@@ -193,14 +144,19 @@ type AssetFormProps = {
   emptyHint: string;
   action: string;
   busyLabel: string;
-  allowRecipient?: boolean;
+  /**
+   * 0zk recipient field: `optional` shows a checkbox (defaults to self, used by
+   * Shield), `required` always shows the input and blocks submit until valid
+   * (used by Transfer). Omitted = no recipient field.
+   */
+  recipientMode?: "optional" | "required";
+  recipientHint?: string;
   onSubmit: (params: ShieldParams) => Promise<{ txid: string }>;
 };
 
-// Shared token + amount form. `onSubmit` receives { token, tokenId, amount,
-// recipientAddress? } and resolves to { txid }. When `allowRecipient` is set the
-// form offers an optional 0zk address to receive the shielded funds (defaults to
-// the connected wallet's own shielded address when left off).
+// Shared token + amount form (amount card on top, recipient underneath).
+// `onSubmit` receives { token, tokenId, amount, recipientAddress? } and resolves
+// to { txid }. `recipientMode` controls whether/how a 0zk recipient is offered.
 function AssetForm({
   loading,
   error,
@@ -208,7 +164,8 @@ function AssetForm({
   emptyHint,
   action,
   busyLabel,
-  allowRecipient,
+  recipientMode,
+  recipientHint,
   onSubmit,
 }: AssetFormProps) {
   const [tokenId, setTokenId] = useState("");
@@ -231,10 +188,11 @@ function AssetForm({
   const selected = tokens.find((t) => t.id === tokenId);
   const amountOk =
     Number(amount) > 0 && Number(amount) <= Number(selected?.balance ?? 0);
-  const recipientOk =
-    !allowRecipient ||
-    !useAltRecipient ||
-    (recipient.startsWith("0zk") && recipient.length > 10);
+  const recipientValid = recipient.startsWith("0zk") && recipient.length > 10;
+  const needRecipient =
+    recipientMode === "required" ||
+    (recipientMode === "optional" && useAltRecipient);
+  const recipientOk = !needRecipient || recipientValid;
   const canSubmit = Boolean(selected) && amountOk && recipientOk && !busy;
 
   const submit = async (e: React.FormEvent) => {
@@ -247,8 +205,7 @@ function AssetForm({
         token: selected.currency,
         tokenId: selected.id,
         amount,
-        recipientAddress:
-          allowRecipient && useAltRecipient ? recipient.trim() : undefined,
+        recipientAddress: needRecipient ? recipient.trim() : undefined,
       });
       setResult({ ok: true, txid: res?.txid });
       setAmount("");
@@ -261,51 +218,62 @@ function AssetForm({
 
   return (
     <form className="panel" onSubmit={submit}>
-      <label className="field">
-        <span className="field__label">Token</span>
-        <select
-          className="field__input"
-          value={tokenId}
-          onChange={(e) => setTokenId(e.target.value)}
-        >
-          {tokens.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.label} — {t.balance}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="asset-card">
+        <div className="asset-card__top">
+          <span className="asset-card__label">{action}</span>
+          <div className="asset-card__token">
+            <select
+              className="asset-card__select"
+              value={tokenId}
+              onChange={(e) => setTokenId(e.target.value)}
+              aria-label="Token"
+            >
+              {tokens.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+            <span className="asset-card__token-name">
+              {selected?.currency ?? "—"}
+            </span>
+            <ChevronIcon
+              className="asset-card__chevron"
+              width={18}
+              height={18}
+            />
+          </div>
+        </div>
 
-      <label className="field">
-        <span className="field__label">Amount</span>
-        <div className="field__amount">
+        <div className="asset-card__bottom">
           <input
-            className="field__input"
+            className="asset-card__amount"
             type="number"
+            inputMode="decimal"
             min="0"
             step="any"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
-            placeholder="0.0"
+            placeholder="0"
           />
           {selected && (
-            <button
-              type="button"
-              className="field__max"
-              onClick={() => setAmount(selected.balance)}
-            >
-              MAX
-            </button>
+            <div className="asset-card__meta">
+              <span className="asset-card__balance">
+                Balance: {selected.balance}
+              </span>
+              <button
+                type="button"
+                className="asset-card__max"
+                onClick={() => setAmount(selected.balance)}
+              >
+                MAX
+              </button>
+            </div>
           )}
         </div>
-        {selected && (
-          <span className="field__hint">
-            Balance: {selected.balance} {selected.currency}
-          </span>
-        )}
-      </label>
+      </div>
 
-      {allowRecipient && (
+      {recipientMode === "optional" && (
         <label className="field">
           <span className="field__label field__label--inline">
             <input
@@ -328,9 +296,29 @@ function AssetForm({
                 spellCheck={false}
               />
               <span className="field__hint">
-                Recipient&apos;s 0zk address. Leave off to shield to yourself.
+                {recipientHint ??
+                  "Recipient's 0zk address. Leave off to shield to yourself."}
               </span>
             </>
+          )}
+        </label>
+      )}
+
+      {recipientMode === "required" && (
+        <label className="field">
+          <span className="field__label">Recipient (0zk address)</span>
+          <input
+            className="field__input"
+            type="text"
+            value={recipient}
+            onChange={(e) => setRecipient(e.target.value)}
+            placeholder="0zk…"
+            autoComplete="off"
+            autoCapitalize="off"
+            spellCheck={false}
+          />
+          {recipientHint && (
+            <span className="field__hint">{recipientHint}</span>
           )}
         </label>
       )}

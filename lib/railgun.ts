@@ -5,6 +5,7 @@ import {
   getProver,
   refreshBalances,
   setOnBalanceUpdateCallback,
+  setOnUTXOMerkletreeScanCallback,
   type ArtifactStore,
 } from "@railgun-community/wallet";
 import {
@@ -13,6 +14,7 @@ import {
   ChainType,
   EVMGasType,
   TXIDVersion,
+  type MerkletreeScanUpdateEvent,
 } from "@railgun-community/shared-models";
 import { POI } from "@railgun-community/engine";
 import * as snarkjs from "snarkjs";
@@ -125,6 +127,23 @@ export const getShieldedBalance = (tokenAddress: string): bigint => {
   return max;
 };
 
+// Every shielded token with a positive balance (largest across buckets), keyed
+// by lowercased address. Backs the Transfer tab's token picker.
+export const getShieldedTokens = (): {
+  tokenAddress: string;
+  amount: bigint;
+}[] => {
+  const maxByToken = new Map<string, bigint>();
+  for (const [k, v] of balances) {
+    const tokenAddress = k.slice(k.indexOf(":") + 1);
+    if (v > (maxByToken.get(tokenAddress) ?? 0n))
+      maxByToken.set(tokenAddress, v);
+  }
+  return [...maxByToken]
+    .filter(([, amount]) => amount > 0n)
+    .map(([tokenAddress, amount]) => ({ tokenAddress, amount }));
+};
+
 /**
  * Initialize a RAILGUN wallet client-side on the given network (default Sepolia).
  */
@@ -135,7 +154,21 @@ export async function initRailgun(
     mnemonic,
     encryptionKey,
     networkName = NetworkName.EthereumSepolia,
-  }: { mnemonic: string; encryptionKey: string; networkName?: NetworkName },
+    onScanUpdate,
+    onBalanceUpdate,
+  }: {
+    mnemonic: string;
+    encryptionKey: string;
+    networkName?: NetworkName;
+    /** Fired as the shielded UTXO merkletree scan progresses/completes. */
+    onScanUpdate?: (event: MerkletreeScanUpdateEvent) => void;
+    /**
+     * Fired once the wallet's shielded balances have actually been computed
+     * (fires after the merkletree scan, even for an empty wallet). This — not
+     * scan-complete — is when a displayed balance is trustworthy.
+     */
+    onBalanceUpdate?: () => void;
+  },
   log: LogFn = console.log,
 ): Promise<{ wallet: RailgunWallet; networkName: NetworkName }> {
   log("Starting RAILGUN engine…");
@@ -162,7 +195,18 @@ export async function initRailgun(
           `balance [${e.balanceBucket}] ${tokenAddress.slice(0, 10)}…: ${amount}`,
         );
     }
+    // Balances are now computed (even if empty) — safe to reveal.
+    onBalanceUpdate?.();
   });
+
+  // Forward shielded-UTXO scan progress so the UI can hold off on showing a
+  // (misleading) zero balance until the merkletree is fully synced.
+  if (onScanUpdate) {
+    setOnUTXOMerkletreeScanCallback((event) => {
+      log(`scan [${event.scanStatus}] ${Math.round(event.progress * 100)}%`);
+      onScanUpdate(event);
+    });
+  }
 
   const net = NETWORKS[networkName];
   log(`Loading provider (${networkName})…`);
