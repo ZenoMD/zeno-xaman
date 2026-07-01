@@ -113,7 +113,7 @@ export default function Page() {
       <p className="status">{status}</p>
 
       <details className="log">
-        <summary>Activity log</summary>
+        <summary>Logs</summary>
         <pre>{logs.join("\n")}</pre>
       </details>
     </main>

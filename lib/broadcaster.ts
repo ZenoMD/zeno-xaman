@@ -102,6 +102,24 @@ export function startBroadcasterClient(
   return startPromise;
 }
 
+/**
+ * Disconnect the broadcaster Waku client and reset the session guard so a later
+ * transfer can reconnect. Safe to call when not started; errors are swallowed
+ * (the transfer that triggered this has already succeeded).
+ */
+export async function stopBroadcasterClient(
+  log: LogFn = console.log,
+): Promise<void> {
+  if (!startPromise) return;
+  startPromise = undefined;
+  try {
+    await WakuBroadcasterClient.stop();
+    log("broadcaster: disconnected");
+  } catch (e) {
+    log(`broadcaster stop error: ${(e as Error).message}`);
+  }
+}
+
 // Poll for a broadcaster willing to accept `tokenAddress` as its fee token.
 // Fees arrive over Waku after connecting, so this isn't available immediately.
 async function waitForBroadcaster(
@@ -290,5 +308,9 @@ export async function transferViaBroadcaster(
 
   const txHash = await broadcasterTransaction.send();
   log(`Broadcaster submitted → ${txHash}`);
+
+  // Transfer done — tear down the Waku connection (a later transfer reconnects).
+  await stopBroadcasterClient(log);
+
   return { txHash };
 }
