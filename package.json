@@ -7,7 +7,10 @@
     "predev": "bun run copy-wasm",
     "dev": "next dev",
     "prebuild": "bun run copy-wasm",
-    "build": "next build"
+    "build": "next build",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "@railgun-community/waku-broadcaster-client-web": "file:./vendor/waku-broadcaster-client-web",
@@ -21,6 +24,10 @@
     "xumm": "^1.8.0"
   },
   "devDependencies": {
+    "@types/abstract-leveldown": "^7.2.5",
+    "@types/node": "^26.0.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
     "abstract-leveldown": "^7.2.0",
     "assert": "^2.1.0",
     "browserify-zlib": "^0.2.0",
@@ -28,9 +35,11 @@
     "constants-browserify": "^1.0.0",
     "crypto-browserify": "^3.12.1",
     "https-browserify": "^1.0.0",
+    "prettier": "^3.9.4",
     "process": "^0.11.10",
     "stream-browserify": "^3.0.0",
     "stream-http": "^3.2.0",
+    "typescript": "^6.0.3",
     "url": "^0.11.4",
     "vm-browserify": "^1.1.2"
   }

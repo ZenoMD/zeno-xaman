@@ -13,7 +13,11 @@ const destDir = join(root, "public/sqlite3");
 
 mkdirSync(destDir, { recursive: true });
 
-for (const file of ["index.mjs", "sqlite3.wasm", "sqlite3-opfs-async-proxy.js"]) {
+for (const file of [
+  "index.mjs",
+  "sqlite3.wasm",
+  "sqlite3-opfs-async-proxy.js",
+]) {
   copyFileSync(join(distDir, file), join(destDir, file));
   console.log(`copied ${file} -> public/sqlite3/${file}`);
 }

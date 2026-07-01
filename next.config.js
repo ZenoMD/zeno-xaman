@@ -21,7 +21,10 @@ const nextConfig = {
         (resource) => {
           const from = (resource.context || "").replace(/\\/g, "/");
           if (from.includes("@railgun-community/wallet/dist")) {
-            resource.request = path.resolve(__dirname, "lib/railgun-gas-price-shim.js");
+            resource.request = path.resolve(
+              __dirname,
+              "lib/railgun-gas-price-shim.ts",
+            );
           }
         },
       ),
@@ -62,7 +65,10 @@ const nextConfig = {
     config.module.exprContextCritical = false;
     config.ignoreWarnings = [
       ...(config.ignoreWarnings || []),
-      { message: /Critical dependency: the request of a dependency is an expression/ },
+      {
+        message:
+          /Critical dependency: the request of a dependency is an expression/,
+      },
     ];
 
     return config;

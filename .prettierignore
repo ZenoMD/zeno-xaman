@@ -1,0 +1,15 @@
+# Dependencies & build output
+node_modules
+.next
+out
+
+# Generated / copied assets
+public/sqlite3
+public/sqlite3.wasm
+
+# Vendored fork and git submodules (not ours to format)
+vendor
+contracts
+
+# Lockfiles
+bun.lock

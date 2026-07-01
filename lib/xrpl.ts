@@ -1,4 +1,5 @@
-import { getXumm } from "./xumm-client.js";
+import { getXumm } from "./xumm-client";
+import type { XrplToken, XrplTokens } from "./types";
 
 // Read the connected XRPL wallet's holdings straight off the ledger. The xumm
 // SDK gives us the connected account and the node endpoint Xaman is using; we
@@ -7,7 +8,7 @@ import { getXumm } from "./xumm-client.js";
 
 // XRPL currency codes are either a 3-char ASCII code or a 160-bit hex blob
 // (used for non-standard codes). Decode the hex form back to readable text.
-const decodeCurrency = (code) => {
+const decodeCurrency = (code: string): string => {
   if (!code || code.length <= 3) return code;
   const hex = code.replace(/0+$/, "");
   let out = "";
@@ -20,37 +21,50 @@ const decodeCurrency = (code) => {
 
 // xumm reports the endpoint as a ws(s):// URL already; fall back to the public
 // mainnet cluster and coerce an http(s) endpoint to its websocket form.
-const toWebSocketUrl = (endpoint) => {
+const toWebSocketUrl = (endpoint?: string | null): string => {
   if (!endpoint) return "wss://xrplcluster.com";
   if (endpoint.startsWith("ws")) return endpoint;
   return endpoint.replace(/^http/, "ws");
 };
 
+type XrplCommand = Record<string, unknown>;
+type XrplReply = { id: number; result?: Record<string, any> };
+
 // Fire a batch of XRPL commands over a single WebSocket and resolve once every
 // reply (matched by id) is in. Closes the socket either way.
-const xrplBatch = (wsUrl, commands, timeoutMs = 15000) =>
+const xrplBatch = (
+  wsUrl: string,
+  commands: XrplCommand[],
+  timeoutMs = 15000,
+): Promise<Record<number, XrplReply>> =>
   new Promise((resolve, reject) => {
-    let ws;
+    let ws: WebSocket;
     try {
       ws = new WebSocket(wsUrl);
     } catch (e) {
-      return reject(new Error(`Cannot reach XRPL node: ${e.message || e}`));
+      return reject(
+        new Error(`Cannot reach XRPL node: ${(e as Error).message || e}`),
+      );
     }
-    const results = {};
+    const results: Record<number, XrplReply> = {};
     let remaining = commands.length;
     const timer = setTimeout(() => {
-      try { ws.close(); } catch {}
+      try {
+        ws.close();
+      } catch {}
       reject(new Error("XRPL request timed out"));
     }, timeoutMs);
 
     ws.onopen = () =>
       commands.forEach((cmd, id) => ws.send(JSON.stringify({ ...cmd, id })));
-    ws.onmessage = (ev) => {
-      const msg = JSON.parse(ev.data);
+    ws.onmessage = (ev: MessageEvent) => {
+      const msg = JSON.parse(ev.data) as XrplReply;
       results[msg.id] = msg;
       if (--remaining === 0) {
         clearTimeout(timer);
-        try { ws.close(); } catch {}
+        try {
+          ws.close();
+        } catch {}
         resolve(results);
       }
     };
@@ -63,13 +77,8 @@ const xrplBatch = (wsUrl, commands, timeoutMs = 15000) =>
 /**
  * List the spendable assets in the connected XRPL wallet: native XRP plus any
  * issued currencies with a positive trustline balance.
- *
- * @returns {Promise<{ account: string, tokens: Array<{
- *   id: string, currency: string, issuer: string|null,
- *   balance: string, label: string,
- * }>}>}
  */
-export async function fetchXrplTokens() {
+export async function fetchXrplTokens(): Promise<XrplTokens> {
   const xumm = getXumm();
   const [account, endpoint] = await Promise.all([
     xumm.user.account,
@@ -83,7 +92,7 @@ export async function fetchXrplTokens() {
     { command: "account_lines", account, ledger_index: "validated" },
   ]);
 
-  const tokens = [];
+  const tokens: XrplToken[] = [];
 
   // XRP — Balance is in drops (1 XRP = 1e6 drops). Skip if the account is
   // unfunded (account_info returns actNotFound, so account_data is absent).

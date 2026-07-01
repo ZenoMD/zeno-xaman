@@ -10,26 +10,22 @@ import {
   getFallbackProviderForNetwork,
 } from "@railgun-community/wallet";
 import {
-  BroadcasterConnectionStatus,
   EVMGasType,
   TXIDVersion,
   getEVMGasTypeForTransaction,
   calculateGasPrice,
   NETWORK_CONFIG,
+  type Chain,
+  type NetworkName,
+  type TransactionGasDetails,
+  type FeeTokenDetails,
+  type SelectedBroadcaster,
+  type RailgunERC20AmountRecipient,
 } from "@railgun-community/shared-models";
+import type { LogFn } from "./types";
 
 const TXID = TXIDVersion.V2_PoseidonMerkle;
 
-// --- Broadcaster network config ------------------------------------------
-// Our XRPL-EVM broadcaster runs a custom Waku content-topic app and its own
-// Waku node, so the defaults (public RAILGUN DNS discovery, `railgun` topic)
-// don't apply. Override here.
-//
-// Our custom Waku node. A browser can only dial SECURE websocket (`/wss/`) with
-// a DNS name + valid TLS cert — a plain `/ws/` (or bare IP) is rejected by
-// libp2p's transport filter and blocked as mixed content on HTTPS pages. Fly.io
-// terminates TLS on :443 and forwards plain ws to nwaku's :8000, so we use the
-// app's `*.fly.dev` hostname here. TODO: confirm the exact Fly hostname.
 const NODE_MULTIADDR =
   "/dns4/broadcaster-nwaku.fly.dev/tcp/443/wss/p2p/16Uiu2HAmS2pghMxhmS3gdhvZD15LY2BCPk6gxKSLGpJUgTkZx8Sc";
 
@@ -63,22 +59,25 @@ export const BROADCASTER_CONFIG = {
   // The custom node is the only peer source, so skip public DNS discovery.
   useDNSDiscovery: false,
 };
-// -------------------------------------------------------------------------
 
-let startPromise; // start the Waku client at most once per session
+let startPromise: Promise<void> | undefined; // start the Waku client at most once per session
 
-const chainForNetwork = (networkName) => NETWORK_CONFIG[networkName].chain;
+const chainForNetwork = (networkName: NetworkName): Chain =>
+  NETWORK_CONFIG[networkName].chain;
 
 /**
  * Connect to the broadcaster Waku network (idempotent). Resolves once the
  * client is started; broadcaster fee messages then arrive asynchronously.
  */
-export function startBroadcasterClient(networkName, log = console.log) {
+export function startBroadcasterClient(
+  networkName: NetworkName,
+  log: LogFn = console.log,
+): Promise<void> {
   if (startPromise) return startPromise;
 
   const chain = chainForNetwork(networkName);
 
-  const statusCallback = (_chain, status) => {
+  const statusCallback = (_chain: unknown, status: string) => {
     log(`broadcaster: ${status}`);
   };
 
@@ -94,7 +93,7 @@ export function startBroadcasterClient(networkName, log = console.log) {
       useDNSDiscovery: BROADCASTER_CONFIG.useDNSDiscovery,
     },
     statusCallback,
-    { log, error: (e) => log(`broadcaster error: ${e.message}`) },
+    { log, error: (e: Error) => log(`broadcaster error: ${e.message}`) },
   ).catch((e) => {
     startPromise = undefined; // allow a later retry
     throw e;
@@ -105,7 +104,12 @@ export function startBroadcasterClient(networkName, log = console.log) {
 
 // Poll for a broadcaster willing to accept `tokenAddress` as its fee token.
 // Fees arrive over Waku after connecting, so this isn't available immediately.
-async function waitForBroadcaster(chain, tokenAddress, log, timeoutMs = 45000) {
+async function waitForBroadcaster(
+  chain: Chain,
+  tokenAddress: string,
+  log: LogFn,
+  timeoutMs = 45000,
+): Promise<SelectedBroadcaster> {
   const useRelayAdapt = false;
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -127,7 +131,9 @@ async function waitForBroadcaster(chain, tokenAddress, log, timeoutMs = 45000) {
 
 // Current EIP-1559 fee data for the network, as Type2 gas details (XRPL EVM is
 // Type2). gasEstimate is filled in after the estimate call.
-async function fetchGasDetails(networkName) {
+async function fetchGasDetails(
+  networkName: NetworkName,
+): Promise<TransactionGasDetails> {
   const evmGasType = getEVMGasTypeForTransaction(networkName, false);
   const provider = getFallbackProviderForNetwork(networkName);
   const feeData = await provider.getFeeData();
@@ -135,29 +141,36 @@ async function fetchGasDetails(networkName) {
   if (evmGasType === EVMGasType.Type2) {
     const maxPriorityFeePerGas = feeData.maxPriorityFeePerGas ?? 1_000_000_000n;
     const maxFeePerGas =
-      feeData.maxFeePerGas ?? (feeData.gasPrice ?? 1_000_000_000n) + maxPriorityFeePerGas;
+      feeData.maxFeePerGas ??
+      (feeData.gasPrice ?? 1_000_000_000n) + maxPriorityFeePerGas;
     return { evmGasType, gasEstimate: 0n, maxFeePerGas, maxPriorityFeePerGas };
   }
-  return { evmGasType, gasEstimate: 0n, gasPrice: feeData.gasPrice ?? 1_000_000_000n };
+  return {
+    evmGasType,
+    gasEstimate: 0n,
+    gasPrice: feeData.gasPrice ?? 1_000_000_000n,
+  } as TransactionGasDetails;
 }
+
+export type TransferViaBroadcasterParams = {
+  networkName: NetworkName;
+  railgunWalletID: string;
+  encryptionKey: string;
+  /** 0zk recipient */
+  recipientAddress: string;
+  /** shielded ERC20 (also the fee token) */
+  tokenAddress: string;
+  /** amount in base units */
+  amount: bigint;
+  /** optional private memo */
+  memoText?: string;
+};
 
 /**
  * Private (shielded) transfer via a RAILGUN broadcaster. Estimates the fee,
  * proves the transfer in-WebView, then hands the proved `transact` calldata to
  * the broadcaster over Waku — the broadcaster submits it on XRPL EVM and takes
  * its fee from the shielded amount. Nothing touches XRPL / Xaman.
- *
- * @param {object} p
- * @param {string} p.networkName
- * @param {string} p.railgunWalletID
- * @param {string} p.encryptionKey
- * @param {string} p.recipientAddress  0zk recipient
- * @param {string} p.tokenAddress      shielded ERC20 (also the fee token)
- * @param {bigint} p.amount            amount in base units
- * @param {string} [p.memoText]        optional private memo
- * @param {(msg: string) => void} [log]
- * @param {(pct: number) => void} [onProgress]
- * @returns {Promise<{ txHash: string }>}
  */
 export async function transferViaBroadcaster(
   {
@@ -168,10 +181,10 @@ export async function transferViaBroadcaster(
     tokenAddress,
     amount,
     memoText,
-  },
-  log = console.log,
-  onProgress = () => {},
-) {
+  }: TransferViaBroadcasterParams,
+  log: LogFn = console.log,
+  onProgress: (pct: number) => void = () => {},
+): Promise<{ txHash: string }> {
   if (!recipientAddress?.startsWith("0zk")) {
     throw new Error("Recipient must be a 0zk RAILGUN address");
   }
@@ -186,12 +199,14 @@ export async function transferViaBroadcaster(
   const broadcaster = await waitForBroadcaster(chain, tokenAddress, log);
   log(`Broadcaster ${broadcaster.railgunAddress.slice(0, 12)}… selected`);
 
-  const feeTokenDetails = {
+  const feeTokenDetails: FeeTokenDetails = {
     tokenAddress,
     feePerUnitGas: BigInt(broadcaster.tokenFee.feePerUnitGas),
   };
 
-  const erc20AmountRecipients = [{ tokenAddress, amount, recipientAddress }];
+  const erc20AmountRecipients: RailgunERC20AmountRecipient[] = [
+    { tokenAddress, amount, recipientAddress },
+  ];
 
   // 1) Estimate gas (iterates to account for the broadcaster fee it will pay).
   log("Estimating gas…");
@@ -209,7 +224,10 @@ export async function transferViaBroadcaster(
     sendWithPublicWallet,
   );
 
-  const gasDetails = { ...originalGasDetails, gasEstimate };
+  const gasDetails = {
+    ...originalGasDetails,
+    gasEstimate,
+  } as TransactionGasDetails;
   const overallBatchMinGasPrice = calculateGasPrice(gasDetails);
 
   // 2) Broadcaster fee (in the shielded token), paid to its 0zk address.
@@ -217,7 +235,7 @@ export async function transferViaBroadcaster(
     feeTokenDetails,
     gasDetails,
   );
-  const broadcasterFeeERC20AmountRecipient = {
+  const broadcasterFeeERC20AmountRecipient: RailgunERC20AmountRecipient = {
     ...broadcasterFeeERC20Amount,
     recipientAddress: broadcaster.railgunAddress,
   };
@@ -237,7 +255,7 @@ export async function transferViaBroadcaster(
     broadcasterFeeERC20AmountRecipient,
     sendWithPublicWallet,
     overallBatchMinGasPrice,
-    (pct) => onProgress(pct || 0),
+    (pct: number) => onProgress(pct || 0),
   );
 
   const { transaction, nullifiers, preTransactionPOIsPerTxidLeafPerList } =
@@ -259,7 +277,7 @@ export async function transferViaBroadcaster(
   log("Submitting to broadcaster…");
   const broadcasterTransaction = await BroadcasterTransaction.create(
     TXID,
-    transaction.to,
+    transaction.to as string,
     transaction.data,
     broadcaster.railgunAddress,
     broadcaster.tokenFee.feesID,

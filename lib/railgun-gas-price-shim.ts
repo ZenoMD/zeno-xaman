@@ -11,9 +11,9 @@
 import { NetworkName } from "@railgun-community/shared-models";
 
 export const shouldSetOverallBatchMinGasPriceForNetwork = (
-  sendWithPublicWallet,
-  networkName,
-) => {
+  sendWithPublicWallet: boolean,
+  networkName: NetworkName,
+): boolean => {
   if (sendWithPublicWallet) {
     // Only Broadcaster transactions require overallBatchMinGasPrice.
     return false;
@@ -22,7 +22,7 @@ export const shouldSetOverallBatchMinGasPriceForNetwork = (
   // XRPL EVM is an EIP-1559 L2-style sidechain — treat it like Arbitrum: don't
   // bind overallBatchMinGasPrice (the contract's minGasPrice check is type-0
   // only, and XRPL EVM is type-2).
-  if (networkName === "XRPL_EVM") {
+  if ((networkName as string) === "XRPL_EVM") {
     return false;
   }
 

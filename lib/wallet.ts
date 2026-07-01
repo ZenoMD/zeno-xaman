@@ -1,36 +1,56 @@
-import { initRailgun, getShieldedBalance, WETH_ADDRESS, XRPL_EVM_NETWORK } from "./railgun.js";
-import { SqliteKV } from "./sqlite/kv.js";
-import { SqliteLevelDown } from "./sqlite/leveldown.js";
-import { createSqliteArtifactStore } from "./artifact-store.js";
-import { getXumm } from "./xumm-client.js";
-import { fetchXrplTokens } from "./xrpl.js";
-import { shieldViaAxelar } from "./axelar.js";
-import { buildShieldPayload } from "./shield-payload.js";
-import { transferViaBroadcaster } from "./broadcaster.js";
+import {
+  initRailgun,
+  getShieldedBalance,
+  WETH_ADDRESS,
+  XRPL_EVM_NETWORK,
+} from "./railgun";
+import { SqliteKV } from "./sqlite/kv";
+import { SqliteLevelDown } from "./sqlite/leveldown";
+import { createSqliteArtifactStore } from "./artifact-store";
+import { getXumm } from "./xumm-client";
+import { fetchXrplTokens } from "./xrpl";
+import { shieldViaAxelar } from "./axelar";
+import { buildShieldPayload } from "./shield-payload";
+import { transferViaBroadcaster } from "./broadcaster";
 import { Mnemonic, sha256, formatEther, parseEther } from "ethers";
+import type { LogFn, ShieldParams, TransferParams, WalletApi } from "./types";
 
 const NETWORK = XRPL_EVM_NETWORK;
 
-const withTimeout = (promise, ms, label) =>
+const withTimeout = <T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> =>
   Promise.race([
     promise,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms),
+    new Promise<T>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`${label} timed out after ${ms}ms`)),
+        ms,
+      ),
     ),
   ]);
 
+export type StartWalletCallbacks = {
+  /** progress/status messages */
+  log: LogFn;
+  /** the RAILGUN (0zk) address */
+  onAddress: (addr: string) => void;
+  /** formatted WETH balance */
+  onBalance: (balance: string) => void;
+};
+
 /**
  * Boot the shielded wallet: XRPL sign-in -> derive keys -> open SQLite (OPFS) ->
- * start the RAILGUN engine, then poll the shielded balance.
- *
- * @param {object} cb
- * @param {(msg: string) => void} cb.log        progress/status messages
- * @param {(addr: string) => void} cb.onAddress the RAILGUN (0zk) address
- * @param {(weth: string) => void} cb.onBalance formatted WETH balance
- * @returns {Promise<object>} a controller exposing the tab actions and a
- *   `stop()` cleanup that ends the balance polling.
+ * start the RAILGUN engine, then poll the shielded balance. Returns a controller
+ * exposing the tab actions and a `stop()` cleanup that ends the balance polling.
  */
-export async function startWallet({ log, onAddress, onBalance }) {
+export async function startWallet({
+  log,
+  onAddress,
+  onBalance,
+}: StartWalletCallbacks): Promise<WalletApi> {
   log("Deriving shielded account…");
   const { mnemonic, encryptionKey } = await deriveShieldedAccount(log);
 
@@ -70,7 +90,11 @@ export async function startWallet({ log, onAddress, onBalance }) {
   // Real shield: bridge the chosen XRPL asset to the EVM-sidechain shielded pool
   // via Axelar. The form gives us the token id + amount; re-read the wallet to
   // recover the account and full token (issuer/raw currency code) it refers to.
-  const shield = async ({ tokenId, amount, recipientAddress }) => {
+  const shield = async ({
+    tokenId,
+    amount,
+    recipientAddress,
+  }: ShieldParams) => {
     const { account, tokens } = await fetchXrplTokens();
     const token = tokens.find((t) => t.id === tokenId);
     if (!token) throw new Error(`Token ${tokenId} not found in XRPL wallet`);
@@ -91,7 +115,7 @@ export async function startWallet({ log, onAddress, onBalance }) {
   // Private transfer: move shielded funds to another 0zk address via a RAILGUN
   // broadcaster (the proof is too large for an XRPL memo, so it goes over Waku
   // rather than Axelar). Funds stay in the pool; the broadcaster pays EVM gas.
-  const transfer = ({ recipientAddress, amount, memoText }) =>
+  const transfer = ({ recipientAddress, amount, memoText }: TransferParams) =>
     transferViaBroadcaster(
       {
         networkName,
@@ -117,35 +141,38 @@ export async function startWallet({ log, onAddress, onBalance }) {
   };
 }
 
-async function deriveShieldedAccount(log) {
+async function deriveShieldedAccount(
+  log: LogFn,
+): Promise<{ mnemonic: string; encryptionKey: string }> {
   const xumm = getXumm();
 
-  const sub = await xumm.payload.createAndSubscribe(
+  const sub = await xumm.payload!.createAndSubscribe(
     {
       txjson: { TransactionType: "SignIn" },
       custom_meta: { instruction: "Sign in to shielded account" },
     },
     // The socket emits several messages (opened, expiry ticks, …); `signed` is
     // only present on the FINAL outcome. Resolve on that, for both true & false.
-    (event) => {
+    (event: any) => {
       if (typeof event.data.signed !== "undefined") return event.data;
     },
   );
 
   // Open it natively on the same device instead of showing a QR.
-  await xumm.xapp.openSignRequest({ uuid: sub.created.uuid });
+  await xumm.xapp!.openSignRequest({ uuid: sub.created.uuid });
 
-  const resolved = await sub.resolved; // this is event.data
+  const resolved = (await sub.resolved) as any; // this is event.data
   if (!resolved.signed) throw new Error("User declined sign-in");
 
-  const full = await xumm.payload.get(sub.created.uuid);
+  const full = await xumm.payload!.get(sub.created.uuid);
 
-  log(`Sign-in successful; signed payload: ${full.response.hex}`);
+  const hex = full!.response.hex as string;
+  log(`Sign-in successful; signed payload: ${hex}`);
 
   // The signed SignIn blob is deterministic per account/key, so we use it as
   // the seed for the shielded wallet. Hash it into a stable 32-byte value, then
   // domain-separate that into the BIP39 mnemonic and the RAILGUN encryption key.
-  const seed = sha256("0x" + full.response.hex.replace(/^0x/, ""));
+  const seed = sha256("0x" + hex.replace(/^0x/, ""));
   const mnemonic = Mnemonic.fromEntropy(seed.slice(0, 34)).phrase; // 16 bytes -> 12 words
   const encryptionKey = sha256(seed).slice(2); // 64-char hex, no 0x prefix
 

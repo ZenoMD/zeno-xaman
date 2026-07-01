@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect } from "react";
-import { useWallet } from "../lib/use-wallet.js";
-import { WalletTabs } from "../components/wallet-tabs.js";
+import { useWallet } from "../lib/use-wallet";
+import { WalletTabs } from "../components/wallet-tabs";
 
-const shortAddress = (addr) =>
+const shortAddress = (addr: string) =>
   addr.length > 22 ? `${addr.slice(0, 12)}…${addr.slice(-6)}` : addr;
 
 export default function Page() {
@@ -40,7 +40,9 @@ export default function Page() {
         <WalletTabs api={api} />
       ) : (
         <section className="panel__hint">
-          {error ? `Wallet failed to start: ${error.message}` : "Setting up your shielded wallet…"}
+          {error
+            ? `Wallet failed to start: ${error.message}`
+            : "Setting up your shielded wallet…"}
         </section>
       )}
 

@@ -1,14 +1,25 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type {
+  ShieldParams,
+  WalletApi,
+  XrplToken,
+  XrplTokens,
+} from "../lib/types";
 
-const TABS = [
+type TabId = "shield" | "transfer";
+
+const TABS: { id: TabId; label: string }[] = [
   { id: "shield", label: "Shield" },
   { id: "transfer", label: "Transfer" },
 ];
 
-export function WalletTabs({ api }) {
-  const [tab, setTab] = useState("shield");
+type Result =
+  { ok: true; txid?: string } | { ok: false; message: string } | null;
+
+export function WalletTabs({ api }: { api: WalletApi }) {
+  const [tab, setTab] = useState<TabId>("shield");
 
   return (
     <div className="tabs">
@@ -34,20 +45,39 @@ export function WalletTabs({ api }) {
   );
 }
 
+type AssetListState = {
+  loading: boolean;
+  tokens: XrplToken[];
+  error: string | null;
+};
+
 // Load an asset list from the controller, tracking loading/error state. `deps`
 // re-runs the loader (the panels pass [api], which is stable post-boot).
-function useAssetList(loader, deps) {
-  const [state, setState] = useState({ loading: true, tokens: [], error: null });
+function useAssetList(
+  loader: () => Promise<XrplTokens | XrplToken[]>,
+  deps: React.DependencyList,
+): AssetListState {
+  const [state, setState] = useState<AssetListState>({
+    loading: true,
+    tokens: [],
+    error: null,
+  });
   useEffect(() => {
     let active = true;
     setState({ loading: true, tokens: [], error: null });
     Promise.resolve()
       .then(loader)
       .then((res) => {
-        if (active) setState({ loading: false, tokens: res.tokens ?? res, error: null });
+        const tokens = Array.isArray(res) ? res : res.tokens;
+        if (active) setState({ loading: false, tokens, error: null });
       })
-      .catch((err) => {
-        if (active) setState({ loading: false, tokens: [], error: err.message || String(err) });
+      .catch((err: unknown) => {
+        if (active)
+          setState({
+            loading: false,
+            tokens: [],
+            error: (err as Error).message || String(err),
+          });
       });
     return () => {
       active = false;
@@ -57,8 +87,11 @@ function useAssetList(loader, deps) {
   return state;
 }
 
-function ShieldPanel({ api }) {
-  const { loading, tokens, error } = useAssetList(() => api.getXrplTokens(), [api]);
+function ShieldPanel({ api }: { api: WalletApi }) {
+  const { loading, tokens, error } = useAssetList(
+    () => api.getXrplTokens(),
+    [api],
+  );
   return (
     <AssetForm
       loading={loading}
@@ -75,27 +108,30 @@ function ShieldPanel({ api }) {
 
 // Private transfer: send shielded XRP to another 0zk address. Funds stay in the
 // pool, so this needs only a recipient 0zk address + amount (no token picker).
-function TransferPanel({ api }) {
+function TransferPanel({ api }: { api: WalletApi }) {
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState(null);
+  const [result, setResult] = useState<Result>(null);
 
   const recipientOk = recipient.startsWith("0zk") && recipient.length > 10;
   const amountOk = Number(amount) > 0;
   const canSubmit = recipientOk && amountOk && !busy;
 
-  const submit = async (e) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit) return;
     setBusy(true);
     setResult(null);
     try {
-      const res = await api.transfer({ recipientAddress: recipient.trim(), amount });
+      const res = await api.transfer({
+        recipientAddress: recipient.trim(),
+        amount,
+      });
       setResult({ ok: true, txid: res?.txHash });
       setAmount("");
-    } catch (err) {
-      setResult({ ok: false, message: err.message || String(err) });
+    } catch (err: unknown) {
+      setResult({ ok: false, message: (err as Error).message || String(err) });
     } finally {
       setBusy(false);
     }
@@ -128,7 +164,9 @@ function TransferPanel({ api }) {
           onChange={(e) => setAmount(e.target.value)}
           placeholder="0.0"
         />
-        <span className="field__hint">Shielded XRP · stays private in the pool</span>
+        <span className="field__hint">
+          Shielded XRP · stays private in the pool
+        </span>
       </label>
 
       <button type="submit" className="btn" disabled={!canSubmit}>
@@ -136,7 +174,9 @@ function TransferPanel({ api }) {
       </button>
 
       {result && (
-        <p className={`panel__result${result.ok ? "" : " panel__result--error"}`}>
+        <p
+          className={`panel__result${result.ok ? "" : " panel__result--error"}`}
+        >
           {result.ok
             ? `✓ Transfer submitted${result.txid ? ` — ${result.txid.slice(0, 14)}…` : ""}`
             : `✕ ${result.message}`}
@@ -146,21 +186,42 @@ function TransferPanel({ api }) {
   );
 }
 
+type AssetFormProps = {
+  loading: boolean;
+  error: string | null;
+  tokens: XrplToken[];
+  emptyHint: string;
+  action: string;
+  busyLabel: string;
+  allowRecipient?: boolean;
+  onSubmit: (params: ShieldParams) => Promise<{ txid: string }>;
+};
+
 // Shared token + amount form. `onSubmit` receives { token, tokenId, amount,
 // recipientAddress? } and resolves to { txid }. When `allowRecipient` is set the
 // form offers an optional 0zk address to receive the shielded funds (defaults to
 // the connected wallet's own shielded address when left off).
-function AssetForm({ loading, error, tokens, emptyHint, action, busyLabel, allowRecipient, onSubmit }) {
+function AssetForm({
+  loading,
+  error,
+  tokens,
+  emptyHint,
+  action,
+  busyLabel,
+  allowRecipient,
+  onSubmit,
+}: AssetFormProps) {
   const [tokenId, setTokenId] = useState("");
   const [amount, setAmount] = useState("");
   const [useAltRecipient, setUseAltRecipient] = useState(false);
   const [recipient, setRecipient] = useState("");
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState(null);
+  const [result, setResult] = useState<Result>(null);
 
   // Default-select the first token once the list loads.
   useEffect(() => {
-    if (tokens.length && !tokens.some((t) => t.id === tokenId)) setTokenId(tokens[0].id);
+    if (tokens.length && !tokens.some((t) => t.id === tokenId))
+      setTokenId(tokens[0].id);
   }, [tokens, tokenId]);
 
   if (loading) return <p className="panel__hint">Loading tokens…</p>;
@@ -168,14 +229,17 @@ function AssetForm({ loading, error, tokens, emptyHint, action, busyLabel, allow
   if (!tokens.length) return <p className="panel__hint">{emptyHint}</p>;
 
   const selected = tokens.find((t) => t.id === tokenId);
-  const amountOk = Number(amount) > 0 && Number(amount) <= Number(selected?.balance ?? 0);
+  const amountOk =
+    Number(amount) > 0 && Number(amount) <= Number(selected?.balance ?? 0);
   const recipientOk =
-    !allowRecipient || !useAltRecipient || (recipient.startsWith("0zk") && recipient.length > 10);
-  const canSubmit = selected && amountOk && recipientOk && !busy;
+    !allowRecipient ||
+    !useAltRecipient ||
+    (recipient.startsWith("0zk") && recipient.length > 10);
+  const canSubmit = Boolean(selected) && amountOk && recipientOk && !busy;
 
-  const submit = async (e) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canSubmit) return;
+    if (!canSubmit || !selected) return;
     setBusy(true);
     setResult(null);
     try {
@@ -188,8 +252,8 @@ function AssetForm({ loading, error, tokens, emptyHint, action, busyLabel, allow
       });
       setResult({ ok: true, txid: res?.txid });
       setAmount("");
-    } catch (err) {
-      setResult({ ok: false, message: err.message || String(err) });
+    } catch (err: unknown) {
+      setResult({ ok: false, message: (err as Error).message || String(err) });
     } finally {
       setBusy(false);
     }
@@ -264,7 +328,7 @@ function AssetForm({ loading, error, tokens, emptyHint, action, busyLabel, allow
                 spellCheck={false}
               />
               <span className="field__hint">
-                Recipient's 0zk address. Leave off to shield to yourself.
+                Recipient&apos;s 0zk address. Leave off to shield to yourself.
               </span>
             </>
           )}
@@ -276,9 +340,11 @@ function AssetForm({ loading, error, tokens, emptyHint, action, busyLabel, allow
       </button>
 
       {result && (
-        <p className={`panel__result${result.ok ? "" : " panel__result--error"}`}>
+        <p
+          className={`panel__result${result.ok ? "" : " panel__result--error"}`}
+        >
           {result.ok
-            ? `✓ ${action} submitted (mock)${result.txid ? ` — ${result.txid.slice(0, 14)}…` : ""}`
+            ? `✓ ${action} submitted${result.txid ? ` — ${result.txid.slice(0, 14)}…` : ""}`
             : `✕ ${result.message}`}
         </p>
       )}

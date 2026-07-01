@@ -1,42 +1,49 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { WalletApi } from "./types";
+
+export type UseWalletState = {
+  /** latest one-line progress/status message */
+  status: string;
+  /** timestamped activity log */
+  logs: string[];
+  /** RAILGUN (0zk) address, once derived */
+  address: string | null;
+  /** formatted shielded WETH balance */
+  balance: string;
+  /** fatal boot error, if any */
+  error: Error | null;
+  /** wallet controller (tab actions), once booted */
+  api: WalletApi | null;
+};
 
 /**
  * Boots the shielded wallet once on mount and exposes its progress as React
  * state. The heavy, browser-only wallet stack (RAILGUN + snarkjs + SQLite
  * worker + Xaman) is pulled in via a lazy `import()` so it is code-split out of
  * the initial page bundle and never evaluated during the static export.
- *
- * @returns {{
- *   status: string,            // latest one-line progress/status message
- *   logs: string[],            // timestamped activity log
- *   address: string | null,    // RAILGUN (0zk) address, once derived
- *   balance: string,           // formatted shielded WETH balance
- *   error: Error | null,       // fatal boot error, if any
- *   api: object | null,        // wallet controller (tab actions), once booted
- * }}
  */
-export function useWallet() {
+export function useWallet(): UseWalletState {
   const [status, setStatus] = useState("Loading…");
-  const [logs, setLogs] = useState(["loading modules…"]);
+  const [logs, setLogs] = useState<string[]>(["loading modules…"]);
   const [balance, setBalance] = useState("—");
-  const [address, setAddress] = useState(null);
-  const [error, setError] = useState(null);
-  const [api, setApi] = useState(null);
+  const [address, setAddress] = useState<string | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+  const [api, setApi] = useState<WalletApi | null>(null);
   const started = useRef(false);
 
   useEffect(() => {
     if (started.current) return; // guard against double-invocation
     started.current = true;
 
-    const append = (line) =>
+    const append = (line: string) =>
       setLogs((prev) => [
         ...prev,
         `${new Date().toISOString().slice(11, 19)}  ${line}`,
       ]);
 
-    const log = (msg) => {
+    const log = (msg: string) => {
       // eslint-disable-next-line no-console
       console.log("[railgun]", msg);
       setStatus(msg);
@@ -45,18 +52,18 @@ export function useWallet() {
 
     // Surface module load / runtime errors that would otherwise be invisible
     // inside the Xaman WebView (white screen, no console).
-    const onError = (e) =>
+    const onError = (e: ErrorEvent) =>
       append(
         `error: ${e.message || ""}${e.filename ? ` @ ${e.filename}:${e.lineno}` : ""}`,
       );
-    const onRejection = (e) =>
+    const onRejection = (e: PromiseRejectionEvent) =>
       append(`rejection: ${(e.reason && e.reason.message) || e.reason}`);
     window.addEventListener("error", onError);
     window.addEventListener("unhandledrejection", onRejection);
 
     let stop = () => {};
     let cancelled = false;
-    import("./wallet.js")
+    import("./wallet")
       .then(({ startWallet }) =>
         startWallet({ log, onAddress: setAddress, onBalance: setBalance }),
       )
@@ -68,11 +75,12 @@ export function useWallet() {
           setApi(controller);
         }
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         // eslint-disable-next-line no-console
         console.error(err);
-        setError(err);
-        log(`FATAL: ${err && err.stack ? err.stack : err}`);
+        const e = err as Error;
+        setError(e);
+        log(`FATAL: ${e && e.stack ? e.stack : String(err)}`);
       });
 
     return () => {
