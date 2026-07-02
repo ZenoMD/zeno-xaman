@@ -12,9 +12,18 @@ import { getXumm } from "./xumm-client";
 import { fetchXrplTokens } from "./xrpl";
 import { shieldViaAxelar } from "./axelar";
 import { buildShieldPayload } from "./shield-payload";
-import { transferViaBroadcaster } from "./broadcaster";
+import {
+  transferViaBroadcaster,
+  unshieldViaBroadcaster,
+} from "./broadcaster";
 import { Mnemonic, sha256, formatEther, parseEther } from "ethers";
-import type { LogFn, ShieldParams, TransferParams, WalletApi } from "./types";
+import type {
+  LogFn,
+  ShieldParams,
+  TransferParams,
+  UnshieldParams,
+  WalletApi,
+} from "./types";
 
 const NETWORK = XRPL_EVM_NETWORK;
 
@@ -165,6 +174,30 @@ export async function startWallet({
       (pct) => log(`proof ${Math.round(pct * 100)}%`),
     );
 
+  // Unshield: withdraw a shielded balance back to XRPL. Unshields to the RAILGUN
+  // RelayAdapt contract, which multicalls the Axelar ITS to bridge the funds to
+  // an XRPL account. Defaults the destination to the connected XRPL account (the
+  // "account holder"); the broadcaster submits it and pays EVM gas.
+  const unshield = async ({
+    tokenAddress,
+    amount,
+    xrplRecipient,
+  }: UnshieldParams) => {
+    const recipient = xrplRecipient || (await fetchXrplTokens()).account;
+    return unshieldViaBroadcaster(
+      {
+        networkName,
+        railgunWalletID: wallet.id,
+        encryptionKey,
+        xrplRecipient: recipient,
+        tokenAddress,
+        amount: parseEther(String(amount)),
+      },
+      log,
+      (pct) => log(`proof ${Math.round(pct * 100)}%`),
+    );
+  };
+
   // Snapshot the current shielded balances as pickable tokens for the Transfer
   // tab. All shielded assets here are 18-decimal (native XRP is the only one
   // today), so format with formatEther and label known addresses.
@@ -188,6 +221,7 @@ export async function startWallet({
     getShieldedTokens,
     shield,
     transfer,
+    unshield,
     stop: () => clearInterval(timer),
   };
 }

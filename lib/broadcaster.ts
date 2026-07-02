@@ -6,6 +6,9 @@ import {
   gasEstimateForUnprovenTransfer,
   generateTransferProof,
   populateProvedTransfer,
+  gasEstimateForUnprovenCrossContractCalls,
+  generateCrossContractCallsProof,
+  populateProvedCrossContractCalls,
   calculateBroadcasterFeeERC20Amount,
   getFallbackProviderForNetwork,
 } from "@railgun-community/wallet";
@@ -20,8 +23,11 @@ import {
   type TransactionGasDetails,
   type FeeTokenDetails,
   type SelectedBroadcaster,
+  type RailgunERC20Amount,
+  type RailgunERC20Recipient,
   type RailgunERC20AmountRecipient,
 } from "@railgun-community/shared-models";
+import { buildUnshieldCrossContractCalls } from "./its";
 import type { LogFn } from "./types";
 
 const TXID = TXIDVersion.V2_PoseidonMerkle;
@@ -125,10 +131,10 @@ export async function stopBroadcasterClient(
 async function waitForBroadcaster(
   chain: Chain,
   tokenAddress: string,
+  useRelayAdapt: boolean,
   log: LogFn,
   timeoutMs = 45000,
 ): Promise<SelectedBroadcaster> {
-  const useRelayAdapt = false;
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const best = WakuBroadcasterClient.findBestBroadcaster(
@@ -214,7 +220,12 @@ export async function transferViaBroadcaster(
   await startBroadcasterClient(networkName, log);
 
   log("Finding a broadcaster…");
-  const broadcaster = await waitForBroadcaster(chain, tokenAddress, log);
+  const broadcaster = await waitForBroadcaster(
+    chain,
+    tokenAddress,
+    useRelayAdapt,
+    log,
+  );
   log(`Broadcaster ${broadcaster.railgunAddress.slice(0, 12)}… selected`);
 
   const feeTokenDetails: FeeTokenDetails = {
@@ -310,6 +321,209 @@ export async function transferViaBroadcaster(
   log(`Broadcaster submitted → ${txHash}`);
 
   // Transfer done — tear down the Waku connection (a later transfer reconnects).
+  await stopBroadcasterClient(log);
+
+  return { txHash };
+}
+
+// Minimum gas forwarded to the RelayAdapt cross-contract calls so the nested
+// ITS interchainTransfer can't run out mid-call. RAILGUN's recommended floor.
+const RELAY_ADAPT_MIN_GAS_LIMIT = 2_800_000n;
+
+// The pool deducts an unshield fee from every unshield, so the RelayAdapt only
+// ever receives `amount - fee`. The ITS transfer must bridge exactly what the
+// RelayAdapt will hold — bridging the gross `amount` over-requests and reverts
+// the interchainTransfer burn. Hardcoded to the deployment's unshield fee.
+const UNSHIELD_FEE_BASIS_POINTS = 10n;
+
+// Mirrors UnshieldNote.getAmountFeeFromValue: fee = value * bp / 10000.
+const amountAfterUnshieldFee = (value: bigint): bigint =>
+  value - (value * UNSHIELD_FEE_BASIS_POINTS) / 10000n;
+
+export type UnshieldViaBroadcasterParams = {
+  networkName: NetworkName;
+  railgunWalletID: string;
+  encryptionKey: string;
+  /** destination XRPL classic r-address (the account holder receiving funds) */
+  xrplRecipient: string;
+  /** shielded ERC20 to unshield (also the broadcaster fee token) */
+  tokenAddress: string;
+  /** amount in base units */
+  amount: bigint;
+};
+
+/**
+ * Unshield to XRPL via a RAILGUN broadcaster + RelayAdapt cross-contract call.
+ * Unshields `amount` from the pool into the RelayAdapt contract, which then runs
+ * a multicall that hands the funds to the Axelar ITS to bridge back to the XRPL
+ * account holder. The proof binds the RelayAdapt address (adaptAddress) and the
+ * exact calls, so the broadcaster can only submit this transaction as-proved.
+ * The broadcaster pays EVM gas and takes its fee from the shielded balance.
+ */
+export async function unshieldViaBroadcaster(
+  {
+    networkName,
+    railgunWalletID,
+    encryptionKey,
+    xrplRecipient,
+    tokenAddress,
+    amount,
+  }: UnshieldViaBroadcasterParams,
+  log: LogFn = console.log,
+  onProgress: (pct: number) => void = () => {},
+): Promise<{ txHash: string }> {
+  const chain = chainForNetwork(networkName);
+  const sendWithPublicWallet = false; // a broadcaster submits it, not us
+  const useRelayAdapt = true; // unshield routes through the RelayAdapt contract
+
+  await startBroadcasterClient(networkName, log);
+
+  log("Finding a broadcaster…");
+  const broadcaster = await waitForBroadcaster(
+    chain,
+    tokenAddress,
+    useRelayAdapt,
+    log,
+  );
+  log(`Broadcaster ${broadcaster.railgunAddress.slice(0, 12)}… selected`);
+
+  const feeTokenDetails: FeeTokenDetails = {
+    tokenAddress,
+    feePerUnitGas: BigInt(broadcaster.tokenFee.feePerUnitGas),
+  };
+
+  // Unshield the gross `amount` to the RelayAdapt contract; it holds the funds
+  // for the duration of the cross-contract calls below. No re-shield afterwards.
+  const relayAdaptUnshieldERC20Amounts: RailgunERC20Amount[] = [
+    { tokenAddress, amount },
+  ];
+  const relayAdaptShieldERC20Recipients: RailgunERC20Recipient[] = [];
+
+  // The RelayAdapt receives `amount - fee`, so the ITS transfer bridges the net.
+  const bridgeAmount = amountAfterUnshieldFee(amount);
+  log(`Bridging ${bridgeAmount} of ${amount} (after unshield fee) → XRPL`);
+
+  // The multicall the RelayAdapt runs while holding the unshielded funds: hand
+  // them to the Axelar ITS to bridge back to the XRPL account holder. Cast to
+  // the SDK's ContractTransaction[] — it bundles its own (older) ethers whose
+  // type differs from ours only on EIP-7702 fields we never set.
+  type CrossContractCalls = Parameters<
+    typeof gasEstimateForUnprovenCrossContractCalls
+  >[8];
+
+  // Gas estimation simulates relay() with no msg.value and requireSuccess=true,
+  // so the RelayAdapt has no native and a payable ITS sub-call would revert.
+  // Estimate with call.value=0; the real gas value is bound only into the proof.
+  const estimateCalls = buildUnshieldCrossContractCalls({
+    amount: bridgeAmount,
+    xrplRecipient,
+    gasValue: 0n,
+  }) as unknown as CrossContractCalls;
+
+  // Proof + populate bind the real call.value; the broadcaster funds the
+  // RelayAdapt with (at least) that much native as msg.value when submitting.
+  const crossContractCalls = buildUnshieldCrossContractCalls({
+    amount: bridgeAmount,
+    xrplRecipient,
+  }) as unknown as CrossContractCalls;
+
+  // 1) Estimate gas (iterates to account for the broadcaster fee it will pay).
+  log("Estimating gas…");
+  const originalGasDetails = await fetchGasDetails(networkName);
+  const { gasEstimate } = await gasEstimateForUnprovenCrossContractCalls(
+    TXID,
+    networkName,
+    railgunWalletID,
+    encryptionKey,
+    relayAdaptUnshieldERC20Amounts,
+    [], // no NFTs to unshield
+    relayAdaptShieldERC20Recipients,
+    [], // no NFTs to re-shield
+    estimateCalls,
+    originalGasDetails,
+    feeTokenDetails,
+    sendWithPublicWallet,
+    RELAY_ADAPT_MIN_GAS_LIMIT,
+  ).catch((err: unknown) => {
+    // "RelayAdapt multicall failed at index N" hides the real sub-call revert in
+    // err.cause — surface it so ITS failures (bad chain/tokenId, gas, balance)
+    // are diagnosable instead of opaque.
+    const cause = (err as { cause?: Error }).cause;
+    if (cause?.message) log(`revert reason (call): ${cause.message}`);
+    throw err;
+  });
+
+  const gasDetails = {
+    ...originalGasDetails,
+    gasEstimate,
+  } as TransactionGasDetails;
+  const overallBatchMinGasPrice = calculateGasPrice(gasDetails);
+
+  // 2) Broadcaster fee (in the shielded token), paid to its 0zk address.
+  const broadcasterFeeERC20Amount = calculateBroadcasterFeeERC20Amount(
+    feeTokenDetails,
+    gasDetails,
+  );
+  const broadcasterFeeERC20AmountRecipient: RailgunERC20AmountRecipient = {
+    ...broadcasterFeeERC20Amount,
+    recipientAddress: broadcaster.railgunAddress,
+  };
+
+  // 3) Prove the cross-contract calls (heavy snarkjs work in the WebView). This
+  //    binds the RelayAdapt adaptAddress + the exact calls into the proof.
+  log("Generating unshield proof…");
+  await generateCrossContractCallsProof(
+    TXID,
+    networkName,
+    railgunWalletID,
+    encryptionKey,
+    relayAdaptUnshieldERC20Amounts,
+    [],
+    relayAdaptShieldERC20Recipients,
+    [],
+    crossContractCalls,
+    broadcasterFeeERC20AmountRecipient,
+    sendWithPublicWallet,
+    overallBatchMinGasPrice,
+    RELAY_ADAPT_MIN_GAS_LIMIT,
+    (pct: number) => onProgress(pct || 0),
+  );
+
+  const { transaction, nullifiers, preTransactionPOIsPerTxidLeafPerList } =
+    await populateProvedCrossContractCalls(
+      TXID,
+      networkName,
+      railgunWalletID,
+      relayAdaptUnshieldERC20Amounts,
+      [],
+      relayAdaptShieldERC20Recipients,
+      [],
+      crossContractCalls,
+      broadcasterFeeERC20AmountRecipient,
+      sendWithPublicWallet,
+      overallBatchMinGasPrice,
+      gasDetails,
+    );
+
+  // 4) Hand the proved calldata to the broadcaster over Waku (useRelayAdapt).
+  log("Submitting to broadcaster…");
+  const broadcasterTransaction = await BroadcasterTransaction.create(
+    TXID,
+    transaction.to as string,
+    transaction.data,
+    broadcaster.railgunAddress,
+    broadcaster.tokenFee.feesID,
+    chain,
+    nullifiers ?? [],
+    overallBatchMinGasPrice,
+    useRelayAdapt,
+    preTransactionPOIsPerTxidLeafPerList,
+  );
+
+  const txHash = await broadcasterTransaction.send();
+  log(`Broadcaster submitted → ${txHash}`);
+
+  // Unshield done — tear down the Waku connection (a later action reconnects).
   await stopBroadcasterClient(log);
 
   return { txHash };

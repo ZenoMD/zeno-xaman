@@ -34,6 +34,14 @@ export type TransferParams = {
   memoText?: string;
 };
 
+export type UnshieldParams = {
+  amount: string;
+  /** shielded ERC20 to unshield (EVM address). */
+  tokenAddress: string;
+  /** Optional destination XRPL r-address; defaults to the connected account. */
+  xrplRecipient?: string;
+};
+
 /** The wallet controller returned by startWallet() and consumed by the UI. */
 export type WalletApi = {
   railgunAddress: string;
@@ -43,5 +51,7 @@ export type WalletApi = {
   getShieldedTokens: () => Promise<XrplToken[]>;
   shield: (params: ShieldParams) => Promise<{ txid: string }>;
   transfer: (params: TransferParams) => Promise<{ txHash: string }>;
+  /** Unshield a pool balance back to XRPL via RelayAdapt + Axelar ITS. */
+  unshield: (params: UnshieldParams) => Promise<{ txHash: string }>;
   stop: () => void;
 };

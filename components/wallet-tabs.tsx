@@ -9,11 +9,12 @@ import type {
 } from "../lib/types";
 import ChevronIcon from "./icons/chevron-down.svg";
 
-type TabId = "shield" | "transfer";
+type TabId = "shield" | "transfer" | "unshield";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "shield", label: "Shield" },
   { id: "transfer", label: "Transfer" },
+  { id: "unshield", label: "Unshield" },
 ];
 
 type Result =
@@ -41,6 +42,7 @@ export function WalletTabs({ api }: { api: WalletApi }) {
       <div className="tabs__panel" role="tabpanel">
         {tab === "shield" && <ShieldPanel api={api} />}
         {tab === "transfer" && <TransferPanel api={api} />}
+        {tab === "unshield" && <UnshieldPanel api={api} />}
       </div>
     </div>
   );
@@ -131,6 +133,30 @@ function TransferPanel({ api }: { api: WalletApi }) {
           amount,
           recipientAddress: recipientAddress!,
         });
+        return { txid: res.txHash };
+      }}
+    />
+  );
+}
+
+// Unshield: withdraw a shielded balance back to XRPL. Pick which shielded token
+// and amount; it unshields via RelayAdapt and bridges back to the connected
+// XRPL account (the account holder) via Axelar — no recipient field needed.
+function UnshieldPanel({ api }: { api: WalletApi }) {
+  const { loading, tokens, error } = useAssetList(
+    () => api.getShieldedTokens(),
+    [api],
+  );
+  return (
+    <AssetForm
+      loading={loading}
+      error={error}
+      tokens={tokens}
+      emptyHint="No shielded balance yet. Shield some funds first."
+      action="Unshield"
+      busyLabel="Proving & sending…"
+      onSubmit={async ({ tokenId, amount }) => {
+        const res = await api.unshield({ tokenAddress: tokenId, amount });
         return { txid: res.txHash };
       }}
     />
