@@ -90,7 +90,11 @@ const NETWORKS: Record<string, NetworkProviders> = {
     // Only one public RPC, so weight 2 to clear the fallback quorum (the engine
     // requires total provider weight >= 2).
     providers: [
-      { provider: "https://rpc.xrplevm.org", priority: 1, weight: 2 },
+      {
+        provider: "https://json-rpc.xrpl.cumulo.org.es",
+        priority: 1,
+        weight: 2,
+      },
     ],
   },
 };

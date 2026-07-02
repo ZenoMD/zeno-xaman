@@ -27,7 +27,7 @@ import {
   type RailgunERC20Recipient,
   type RailgunERC20AmountRecipient,
 } from "@railgun-community/shared-models";
-import { buildUnshieldCrossContractCalls } from "./its";
+import { buildUnshieldCrossContractCalls, RETURN_GAS_VALUE } from "./its";
 import type { LogFn } from "./types";
 
 const TXID = TXIDVersion.V2_PoseidonMerkle;
@@ -459,13 +459,17 @@ export async function unshieldViaBroadcaster(
   } as TransactionGasDetails;
   const overallBatchMinGasPrice = calculateGasPrice(gasDetails);
 
-  // 2) Broadcaster fee (in the shielded token), paid to its 0zk address.
+  // 2) Broadcaster fee (in the shielded token), paid to its 0zk address. On top
+  //    of the quoted EVM gas fee, reimburse the broadcaster for the native XRP it
+  //    fronts as msg.value on the relay() call (Axelar cross-chain gas). The fee
+  //    token is XRP (18 dp), so RETURN_GAS_VALUE converts 1:1 to fee-token units.
   const broadcasterFeeERC20Amount = calculateBroadcasterFeeERC20Amount(
     feeTokenDetails,
     gasDetails,
   );
   const broadcasterFeeERC20AmountRecipient: RailgunERC20AmountRecipient = {
-    ...broadcasterFeeERC20Amount,
+    tokenAddress: broadcasterFeeERC20Amount.tokenAddress,
+    amount: broadcasterFeeERC20Amount.amount + RETURN_GAS_VALUE,
     recipientAddress: broadcaster.railgunAddress,
   };
 
