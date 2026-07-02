@@ -20,6 +20,11 @@ const TABS: { id: TabId; label: string }[] = [
 type Result =
   { ok: true; txid?: string } | { ok: false; message: string } | null;
 
+// Shield/unshield are Axelar GMP transfers; their source tx (XRPL hash for
+// shield, EVM relay() hash for unshield) resolves on Axelarscan's GMP explorer.
+const axelarscanGmpUrl = (txid: string): string =>
+  `https://axelarscan.io/gmp/${txid}`;
+
 export function WalletTabs({ api }: { api: WalletApi }) {
   const [tab, setTab] = useState<TabId>("shield");
 
@@ -104,6 +109,7 @@ function ShieldPanel({ api }: { api: WalletApi }) {
       action="Shield"
       busyLabel="Shielding…"
       recipientMode="optional"
+      onExplorer={(txid) => api.openBrowser(axelarscanGmpUrl(txid))}
       onSubmit={api.shield}
     />
   );
@@ -160,6 +166,7 @@ function UnshieldPanel({ api }: { api: WalletApi }) {
       recipientKind="xrpl"
       recipientLabel="Unshield to another XRPL account"
       recipientHint="Recipient's XRPL address. Leave off to send to your own account."
+      onExplorer={(txid) => api.openBrowser(axelarscanGmpUrl(txid))}
       onSubmit={async ({ tokenId, amount, recipientAddress }) => {
         const res = await api.unshield({
           tokenAddress: tokenId,
@@ -190,6 +197,8 @@ type AssetFormProps = {
   /** Text for the optional-recipient checkbox / required-recipient field label. */
   recipientLabel?: string;
   recipientHint?: string;
+  /** Opens an explorer for a successful txid (via the xApp browser); shown as a link. */
+  onExplorer?: (txid: string) => void;
   onSubmit: (params: ShieldParams) => Promise<{ txid: string }>;
 };
 
@@ -207,6 +216,7 @@ function AssetForm({
   recipientKind = "0zk",
   recipientLabel,
   recipientHint,
+  onExplorer,
   onSubmit,
 }: AssetFormProps) {
   const [tokenId, setTokenId] = useState("");
@@ -388,9 +398,28 @@ function AssetForm({
         <p
           className={`panel__result${result.ok ? "" : " panel__result--error"}`}
         >
-          {result.ok
-            ? `✓ ${action} submitted${result.txid ? ` — ${result.txid.slice(0, 14)}…` : ""}`
-            : `✕ ${result.message}`}
+          {result.ok ? (
+            <>
+              ✓ {action} submitted
+              {result.txid &&
+                (onExplorer ? (
+                  <>
+                    {" — "}
+                    <button
+                      type="button"
+                      className="panel__result-link"
+                      onClick={() => onExplorer(result.txid!)}
+                    >
+                      track on Axelarscan ↗
+                    </button>
+                  </>
+                ) : (
+                  ` — ${result.txid.slice(0, 14)}…`
+                ))}
+            </>
+          ) : (
+            `✕ ${result.message}`
+          )}
         </p>
       )}
     </form>

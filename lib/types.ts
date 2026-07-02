@@ -53,5 +53,7 @@ export type WalletApi = {
   transfer: (params: TransferParams) => Promise<{ txHash: string }>;
   /** Unshield a pool balance back to XRPL via RelayAdapt + Axelar ITS. */
   unshield: (params: UnshieldParams) => Promise<{ txHash: string }>;
+  /** Open an external URL in the device browser via the Xaman xApp SDK. */
+  openBrowser: (url: string) => void;
   stop: () => void;
 };

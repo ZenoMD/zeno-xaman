@@ -267,6 +267,17 @@ button.balance-card__address:active {
   word-break: break-all;
 }
 
+.panel__result-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .field {
   display: flex;
   flex-direction: column;

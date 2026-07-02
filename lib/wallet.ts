@@ -222,6 +222,11 @@ export async function startWallet({
     shield,
     transfer,
     unshield,
+    // Regular <a> links don't escape the xApp WebView; route external URLs
+    // (e.g. Axelarscan) through the Xaman xApp browser instead.
+    openBrowser: (url: string) => {
+      getXumm().xapp?.openBrowser({ url });
+    },
     stop: () => clearInterval(timer),
   };
 }
