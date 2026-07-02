@@ -140,8 +140,9 @@ function TransferPanel({ api }: { api: WalletApi }) {
 }
 
 // Unshield: withdraw a shielded balance back to XRPL. Pick which shielded token
-// and amount; it unshields via RelayAdapt and bridges back to the connected
-// XRPL account (the account holder) via Axelar — no recipient field needed.
+// and amount; it unshields via RelayAdapt and bridges back to XRPL via Axelar.
+// Defaults to the connected account, with an option to send to another XRPL
+// address.
 function UnshieldPanel({ api }: { api: WalletApi }) {
   const { loading, tokens, error } = useAssetList(
     () => api.getShieldedTokens(),
@@ -155,8 +156,16 @@ function UnshieldPanel({ api }: { api: WalletApi }) {
       emptyHint="No shielded balance yet. Shield some funds first."
       action="Unshield"
       busyLabel="Proving & sending…"
-      onSubmit={async ({ tokenId, amount }) => {
-        const res = await api.unshield({ tokenAddress: tokenId, amount });
+      recipientMode="optional"
+      recipientKind="xrpl"
+      recipientLabel="Unshield to another XRPL account"
+      recipientHint="Recipient's XRPL address. Leave off to send to your own account."
+      onSubmit={async ({ tokenId, amount, recipientAddress }) => {
+        const res = await api.unshield({
+          tokenAddress: tokenId,
+          amount,
+          xrplRecipient: recipientAddress,
+        });
         return { txid: res.txHash };
       }}
     />
@@ -171,11 +180,15 @@ type AssetFormProps = {
   action: string;
   busyLabel: string;
   /**
-   * 0zk recipient field: `optional` shows a checkbox (defaults to self, used by
-   * Shield), `required` always shows the input and blocks submit until valid
-   * (used by Transfer). Omitted = no recipient field.
+   * Recipient field: `optional` shows a checkbox (defaults to self, used by
+   * Shield/Unshield), `required` always shows the input and blocks submit until
+   * valid (used by Transfer). Omitted = no recipient field.
    */
   recipientMode?: "optional" | "required";
+  /** Address kind the recipient field accepts — controls validation + placeholder. */
+  recipientKind?: "0zk" | "xrpl";
+  /** Text for the optional-recipient checkbox / required-recipient field label. */
+  recipientLabel?: string;
   recipientHint?: string;
   onSubmit: (params: ShieldParams) => Promise<{ txid: string }>;
 };
@@ -191,6 +204,8 @@ function AssetForm({
   action,
   busyLabel,
   recipientMode,
+  recipientKind = "0zk",
+  recipientLabel,
   recipientHint,
   onSubmit,
 }: AssetFormProps) {
@@ -207,14 +222,23 @@ function AssetForm({
       setTokenId(tokens[0].id);
   }, [tokens, tokenId]);
 
-  if (loading) return <p className="panel__hint">Loading tokens…</p>;
   if (error) return <p className="panel__hint panel__hint--error">{error}</p>;
-  if (!tokens.length) return <p className="panel__hint">{emptyHint}</p>;
+  // While loading, keep the card on screen (with an empty token list) rather
+  // than swapping it for a hint — the empty-state hint only shows once the load
+  // has finished and genuinely returned nothing.
+  if (!loading && !tokens.length)
+    return <p className="panel__hint">{emptyHint}</p>;
 
   const selected = tokens.find((t) => t.id === tokenId);
   const amountOk =
     Number(amount) > 0 && Number(amount) <= Number(selected?.balance ?? 0);
-  const recipientValid = recipient.startsWith("0zk") && recipient.length > 10;
+  const recipientPlaceholder = recipientKind === "xrpl" ? "r…" : "0zk…";
+  const recipientValid =
+    recipientKind === "xrpl"
+      ? recipient.startsWith("r") &&
+        recipient.length >= 25 &&
+        recipient.length <= 35
+      : recipient.startsWith("0zk") && recipient.length > 10;
   const needRecipient =
     recipientMode === "required" ||
     (recipientMode === "optional" && useAltRecipient);
@@ -253,15 +277,20 @@ function AssetForm({
               value={tokenId}
               onChange={(e) => setTokenId(e.target.value)}
               aria-label="Token"
+              disabled={loading && !tokens.length}
             >
-              {tokens.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.label}
-                </option>
-              ))}
+              {loading && !tokens.length ? (
+                <option value="">Loading…</option>
+              ) : (
+                tokens.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label}
+                  </option>
+                ))
+              )}
             </select>
             <span className="asset-card__token-name">
-              {selected?.currency ?? "—"}
+              {selected?.currency ?? (loading ? "…" : "—")}
             </span>
             <ChevronIcon
               className="asset-card__chevron"
@@ -307,7 +336,7 @@ function AssetForm({
               checked={useAltRecipient}
               onChange={(e) => setUseAltRecipient(e.target.checked)}
             />
-            Send to a different shielded address
+            {recipientLabel ?? "Shield to another 0zk account"}
           </span>
           {useAltRecipient && (
             <>
@@ -316,7 +345,7 @@ function AssetForm({
                 type="text"
                 value={recipient}
                 onChange={(e) => setRecipient(e.target.value)}
-                placeholder="0zk…"
+                placeholder={recipientPlaceholder}
                 autoComplete="off"
                 autoCapitalize="off"
                 spellCheck={false}
@@ -332,13 +361,15 @@ function AssetForm({
 
       {recipientMode === "required" && (
         <label className="field">
-          <span className="field__label">Recipient (0zk address)</span>
+          <span className="field__label">
+            {recipientLabel ?? "Recipient (0zk address)"}
+          </span>
           <input
             className="field__input"
             type="text"
             value={recipient}
             onChange={(e) => setRecipient(e.target.value)}
-            placeholder="0zk…"
+            placeholder={recipientPlaceholder}
             autoComplete="off"
             autoCapitalize="off"
             spellCheck={false}
