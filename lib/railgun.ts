@@ -18,6 +18,7 @@ import {
 } from "@railgun-community/shared-models";
 import { POI } from "@railgun-community/engine";
 import * as snarkjs from "snarkjs";
+import { Contract, JsonRpcProvider, formatUnits } from "ethers";
 import type { SqliteLevelDown } from "./sqlite/leveldown";
 import type { LogFn } from "./types";
 
@@ -147,6 +148,92 @@ export const getShieldedTokens = (): {
     .filter(([, amount]) => amount > 0n)
     .map(([tokenAddress, amount]) => ({ tokenAddress, amount }));
 };
+
+// --- Shielded-token metadata (for the multi-token balance card) -------------
+
+const ERC20_META_ABI = [
+  "function symbol() view returns (string)",
+  "function decimals() view returns (uint8)",
+];
+
+// symbol/decimals are immutable, so cache per address for the session.
+const tokenMetaCache = new Map<string, { symbol: string; decimals: number }>();
+let metaProvider: JsonRpcProvider | undefined;
+
+const getMetaProvider = (networkName: string): JsonRpcProvider =>
+  (metaProvider ??= new JsonRpcProvider(
+    NETWORKS[networkName].providers[0].provider,
+    undefined,
+    { staticNetwork: true },
+  ));
+
+/**
+ * Resolve an ERC20's { symbol, decimals } for labelling shielded balances. The
+ * wrapped-native sentinel reports as XRP; if the on-chain read fails the token
+ * falls back to a shortened address and 18 decimals.
+ */
+export async function resolveTokenMeta(
+  tokenAddress: string,
+  networkName: string,
+): Promise<{ symbol: string; decimals: number }> {
+  const key = tokenAddress.toLowerCase();
+  const cached = tokenMetaCache.get(key);
+  if (cached) return cached;
+
+  const wrapped = (
+    (NETWORK_CONFIG as Record<string, { baseToken?: { wrappedAddress?: string } }>)[
+      networkName
+    ]
+  )?.baseToken?.wrappedAddress?.toLowerCase();
+
+  let meta: { symbol: string; decimals: number };
+  if (key === WETH_ADDRESS[networkName]?.toLowerCase() || key === wrapped) {
+    meta = { symbol: "XRP", decimals: 18 };
+  } else {
+    try {
+      const erc20 = new Contract(
+        tokenAddress,
+        ERC20_META_ABI,
+        getMetaProvider(networkName),
+      );
+      const [symbol, decimals] = await Promise.all([
+        erc20.symbol(),
+        erc20.decimals(),
+      ]);
+      meta = { symbol: String(symbol), decimals: Number(decimals) };
+    } catch {
+      meta = {
+        symbol: `${tokenAddress.slice(0, 6)}…${tokenAddress.slice(-4)}`,
+        decimals: 18,
+      };
+    }
+  }
+  tokenMetaCache.set(key, meta);
+  return meta;
+}
+
+/**
+ * Every shielded token with a positive balance, decorated with its symbol and
+ * human-formatted amount (scaled by the token's own decimals). Backs the
+ * multi-token balance card.
+ */
+export async function getShieldedBalances(
+  networkName: string,
+): Promise<{ address: string; symbol: string; formatted: string }[]> {
+  return Promise.all(
+    getShieldedTokens().map(async ({ tokenAddress, amount }) => {
+      const { symbol, decimals } = await resolveTokenMeta(
+        tokenAddress,
+        networkName,
+      );
+      return {
+        address: tokenAddress,
+        symbol,
+        formatted: formatUnits(amount, decimals),
+      };
+    }),
+  );
+}
 
 /**
  * Initialize a RAILGUN wallet client-side on the given network (default Sepolia).

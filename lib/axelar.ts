@@ -1,3 +1,4 @@
+import { formatUnits } from "ethers";
 import { getXumm } from "./xumm-client";
 import type { LogFn, XrplToken } from "./types";
 
@@ -8,11 +9,18 @@ export const POOL_ROUTER_ADDRESS = "0x43D9c6CD452aC2eCEe7a22a3b659154eDAf1DaFB";
 // Links on-chain transactions to this xApp
 export const SOURCE_TAG = 2606220004;
 
-// Relayer gas budget, in drops, carved out of each XRP transfer to pay for
-// execution on the destination chain (the `gas_fee_amount` memo). The pool
-// receives Amount − gas_fee_amount. Tune to whatever the relayer requires.
-export const GAS_FEE_DROPS = 100_000; // 0.1 XRP
 const XRP_DROPS = 1_000_000;
+
+// Gas is paid ON TOP of the shielded amount (the Payment carries `amount + gas`,
+// Axelar deducts the gas_fee_amount memo for relay and forwards the rest, so the
+// pool receives exactly `amount`). The fee is always estimated live from Axelar
+// (see estimateShieldGas) — there is deliberately no hardcoded fallback, since a
+// fixed budget could massively overpay for a high-value token (0.5 WBTC as gas).
+
+// Sum two XRPL decimal-string amounts, trimming binary-float noise to XRPL's
+// 15-significant-digit precision (e.g. addDecimal("0.1","0.2") === "0.3").
+const addDecimal = (a: string, b: string): string =>
+  String(Number((Number(a) + Number(b)).toPrecision(15)));
 
 // ASCII → lowercase hex. XRPL memo fields are hex blobs.
 const hex = (s: string): string =>
@@ -65,7 +73,10 @@ export async function shieldViaAxelar(
   log: LogFn = console.log,
 ): Promise<{ txid: string }> {
   const xumm = getXumm();
-  const txjson = buildShieldPayment({ account, token, amount, payload });
+  const txjson = await buildShieldPayment(
+    { account, token, amount, payload },
+    log,
+  );
 
   log(
     `Shield: bridging ${amount} ${token.currency} → ${DESTINATION_CHAIN} ` +
@@ -97,38 +108,137 @@ export async function shieldViaAxelar(
   return { txid };
 }
 
+// --- Axelar gas estimation (GMP API) --------------------------------------
+
+// Axelar's cross-chain gas estimator. It returns the fee already denominated in
+// the `sourceTokenSymbol` we pass, so we ask for it in the transferred asset —
+// exactly what XRPL's gas_fee_amount memo requires.
+const GMP_API = "https://api.gmp.axelarscan.io";
+
+// Destination execution gas for the shield (_executeWithInterchainToken ->
+// pool.shield). The Axelar base fee dominates the estimate, so a rough limit is
+// fine; keep headroom for the RAILGUN commitment insert.
+const SHIELD_GAS_LIMIT = 700_000;
+
+// Buffer Axelar applies to the execution portion of the estimate.
+const GAS_MULTIPLIER = 1.5;
+
+// The estimate barely moves between blocks; cache briefly so we don't hit the
+// API on every amount keystroke.
+const GAS_CACHE_MS = 60_000;
+const gasCache = new Map<string, { fee: string; at: number }>();
+
+// Map an XRPL token to the symbol Axelar's gas API prices. XRP is native; issued
+// currencies use their display code minus any axl prefix/suffix.
+const axelarGasSymbol = (token: XrplToken): string =>
+  !token.issuer
+    ? "XRP"
+    : token.currency.replace(/\.axl$/i, "").replace(/^axl/i, "");
+
+/**
+ * Estimate the Axelar relay gas for shielding `token`, returned in that token's
+ * gas_fee_amount denomination (integer drops for XRP, a decimal string for an
+ * IOU). THROWS if Axelar can't return a plausible price (it returns 0 for tokens
+ * it doesn't price, e.g. WBTC) — there is deliberately no hardcoded fallback,
+ * since a fixed budget could massively overpay for a high-value token (0.5 WBTC
+ * as gas). A failed estimate aborts the shield rather than guessing.
+ */
+async function estimateShieldGas(
+  token: XrplToken,
+  log: LogFn = console.log,
+): Promise<string> {
+  const isXrp = !token.issuer;
+  const symbol = axelarGasSymbol(token);
+  const cached = gasCache.get(symbol);
+  if (cached && Date.now() - cached.at < GAS_CACHE_MS) return cached.fee;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(GMP_API, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        method: "estimateGasFee",
+        sourceChain: "xrpl",
+        destinationChain: DESTINATION_CHAIN,
+        sourceTokenSymbol: symbol,
+        gasLimit: SHIELD_GAS_LIMIT,
+        gasMultiplier: GAS_MULTIPLIER,
+        showDetailedFees: true,
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = (await res.json()) as {
+      totalFee?: string;
+      apiResponse?: { result?: { source_token?: { decimals?: number } } };
+    };
+    const totalFee = data.totalFee;
+    const decimals = data.apiResponse?.result?.source_token?.decimals;
+    const units = Number(totalFee);
+    if (
+      !totalFee ||
+      decimals == null ||
+      !Number.isFinite(units) ||
+      units <= 0
+    ) {
+      throw new Error(
+        `implausible estimate: ${totalFee} (decimals ${decimals})`,
+      );
+    }
+    // totalFee is in the source token's smallest units. XRP's smallest unit IS
+    // the drop (the gas_fee_amount denomination); an IOU needs scaling by its
+    // decimals into a decimal string.
+    const fee = isXrp
+      ? String(Math.round(units))
+      : formatUnits(BigInt(totalFee), decimals);
+    gasCache.set(symbol, { fee, at: Date.now() });
+    log(`Axelar gas estimate (${symbol}): ${fee}`);
+    return fee;
+  } catch (e) {
+    const detail = (e as Error).message;
+    log(`Axelar gas estimate failed (${symbol}): ${detail}`);
+    throw new Error(
+      `Couldn't estimate Axelar bridge gas for ${symbol}; shield aborted (${detail})`,
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Build the XRPL Payment that bridges `amount` of `token` to the shielded pool
  * on the EVM sidechain via Axelar.
  */
-function buildShieldPayment({
-  account,
-  token,
-  amount,
-  payload,
-}: ShieldArgs): ShieldPayment {
+async function buildShieldPayment(
+  { account, token, amount, payload }: ShieldArgs,
+  log: LogFn = console.log,
+): Promise<ShieldPayment> {
   const isXrp = token.id === "XRP" || !token.issuer;
+  if (!(Number(amount) > 0)) {
+    throw new Error("Shield amount must be greater than 0");
+  }
+
+  // Gas is a SEPARATE amount added on top of the shielded value (not carved out
+  // of it), so the pool receives exactly `amount`. The Payment carries
+  // `amount + gas`; Axelar deducts the gas_fee_amount memo for relay and
+  // forwards the remainder. `estimateShieldGas` returns the fee already in this
+  // token's memo denomination (integer drops for XRP, decimal units for an IOU).
+  const gasFee = await estimateShieldGas(token, log);
 
   let Amount: string | IssuedAmount;
-  let gasFee: string;
   if (isXrp) {
     const drops = Math.round(Number(amount) * XRP_DROPS);
-    if (drops <= GAS_FEE_DROPS) {
-      throw new Error(
-        `Amount must exceed the ${GAS_FEE_DROPS / XRP_DROPS} XRP bridge gas fee`,
-      );
-    }
-    Amount = String(drops);
-    gasFee = String(GAS_FEE_DROPS);
+    Amount = String(drops + Number(gasFee));
   } else {
-    // Issued currency (IOU): Amount is an object in the on-ledger currency code.
-    // The gas fee shares the same denomination (left at 0 here — set per token).
+    // Issued currency (IOU): Amount is an object in the on-ledger currency code;
+    // the gas fee is denominated in that same currency.
     Amount = {
       currency: token.rawCurrency || token.currency,
       issuer: token.issuer,
-      value: String(amount),
+      value: addDecimal(amount, gasFee),
     };
-    gasFee = "0";
   }
 
   // EVM destination address: the canonical raw-bytes hex (the 40-char address

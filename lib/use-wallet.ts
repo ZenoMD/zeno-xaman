@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { WalletApi } from "./types";
+import type { ShieldedTokenBalance, WalletApi } from "./types";
 
 /**
  * Scan phase for the shielded balance:
@@ -18,8 +18,8 @@ export type UseWalletState = {
   logs: string[];
   /** RAILGUN (0zk) address, once derived */
   address: string | null;
-  /** formatted shielded WETH balance */
-  balance: string;
+  /** all shielded token balances (XRP is just another entry), highest first */
+  shieldedTokens: ShieldedTokenBalance[];
   /** shielded balance scan phase (drives the dashed balance / "Scanning…") */
   scanState: ScanState;
   /** fatal boot error, if any */
@@ -37,7 +37,9 @@ export type UseWalletState = {
 export function useWallet(): UseWalletState {
   const [status, setStatus] = useState("Loading…");
   const [logs, setLogs] = useState<string[]>(["loading modules…"]);
-  const [balance, setBalance] = useState("—");
+  const [shieldedTokens, setShieldedTokens] = useState<ShieldedTokenBalance[]>(
+    [],
+  );
   const [scanState, setScanState] = useState<ScanState>("idle");
   const [address, setAddress] = useState<string | null>(null);
   const [error, setError] = useState<Error | null>(null);
@@ -79,7 +81,7 @@ export function useWallet(): UseWalletState {
         startWallet({
           log,
           onAddress: setAddress,
-          onBalance: setBalance,
+          onShieldedTokens: setShieldedTokens,
           onScanState: setScanState,
         }),
       )
@@ -107,5 +109,5 @@ export function useWallet(): UseWalletState {
     };
   }, []);
 
-  return { status, logs, balance, scanState, address, error, api };
+  return { status, logs, shieldedTokens, scanState, address, error, api };
 }

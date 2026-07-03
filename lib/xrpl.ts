@@ -1,4 +1,5 @@
 import { getXumm } from "./xumm-client";
+import { AXELAR_GATEWAY } from "./axelar";
 import type { XrplToken, XrplTokens } from "./types";
 
 // Read the connected XRPL wallet's holdings straight off the ledger. The xumm
@@ -122,5 +123,62 @@ export async function fetchXrplTokens(): Promise<XrplTokens> {
     });
   }
 
+  await markAxelarSupport(wsUrl, tokens);
+
   return { account, tokens };
+}
+
+/**
+ * Flag which tokens the Axelar bridge can actually accept for shielding. XRP is
+ * native (always bridgeable). An issued currency is bridgeable only if the
+ * Axelar gateway can receive it on-ledger — otherwise the shield Payment fails
+ * ("trustline does not exist"). Two ways the gateway can receive an IOU, both
+ * read from a single `gateway_balances` call:
+ *
+ *  - obligations: tokens the gateway itself ISSUES (e.g. USDC.axl, WETH, WBTC).
+ *    Here the issuer IS the gateway, so returning them to the issuer always
+ *    succeeds — no counterparty trustline needed.
+ *  - assets: third-party IOUs the gateway HOLDS a trustline to (e.g. Circle's
+ *    native USDC). The gateway can receive these as a normal trustline holder.
+ *
+ * A token matching neither (e.g. RLUSD) is unshieldable. On any failure this
+ * leaves issued tokens unmarked (still selectable) so a transient node error
+ * never blocks shielding; XRP stays supported.
+ */
+async function markAxelarSupport(
+  wsUrl: string,
+  tokens: XrplToken[],
+): Promise<void> {
+  // XRP (no issuer) is always bridgeable.
+  for (const t of tokens) if (!t.issuer) t.supported = true;
+
+  const issued = tokens.filter((t) => t.issuer);
+  if (!issued.length) return;
+
+  try {
+    const res = await xrplBatch(wsUrl, [
+      {
+        command: "gateway_balances",
+        account: AXELAR_GATEWAY,
+        ledger_index: "validated",
+      },
+    ]);
+    const result = res[0]?.result ?? {};
+
+    // The `${on-ledger currency}|${issuer}` pairs the gateway can receive.
+    const receivable = new Set<string>();
+    // Obligations are keyed by currency; the issuer is the gateway itself.
+    for (const currency of Object.keys(result.obligations ?? {}))
+      receivable.add(`${currency}|${AXELAR_GATEWAY}`);
+    // Assets are keyed by third-party issuer → list of held currencies.
+    for (const [issuer, held] of Object.entries(result.assets ?? {}))
+      for (const line of (held as { currency: string }[]) ?? [])
+        receivable.add(`${line.currency}|${issuer}`);
+
+    for (const t of issued)
+      t.supported = receivable.has(`${t.rawCurrency}|${t.issuer}`);
+  } catch {
+    // Support unknown — leave issued tokens unmarked (selectable). XRP stays
+    // supported; a failed shield would surface the trustline error as before.
+  }
 }

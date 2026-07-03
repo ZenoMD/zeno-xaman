@@ -71,7 +71,8 @@ function CopyableAddress({ address }: { address: string }) {
 }
 
 export default function Page() {
-  const { status, logs, balance, scanState, address, error, api } = useWallet();
+  const { status, logs, shieldedTokens, scanState, address, error, api } =
+    useWallet();
 
   // Mirror Xaman's active palette (passed as the `xAppStyle` query param) onto
   // <html> so the theme-scoped CSS variables in globals.css take effect.
@@ -86,12 +87,19 @@ export default function Page() {
     <main className="wallet">
       <section className="balance-card">
         <p className="balance-card__label">Shielded balance</p>
-        <p className="balance-card__amount">
-          <span>{scanState === "complete" ? balance : "—"}</span>{" "}
-          <span className="balance-card__unit">XRP</span>
-        </p>
-        {scanState === "scanning" && (
+        {scanState !== "complete" ? (
           <p className="balance-card__scanning">Scanning…</p>
+        ) : shieldedTokens.length > 0 ? (
+          <ul className="balance-card__tokens">
+            {shieldedTokens.map((t) => (
+              <li key={t.address} className="balance-card__token">
+                <span className="balance-card__token-symbol">{t.symbol}</span>
+                <span className="balance-card__token-amount">{t.balance}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="balance-card__empty">No shielded balance yet</p>
         )}
         {address ? (
           <CopyableAddress address={address} />

@@ -4,3 +4,5 @@ out/
 
 # Generated at build time by scripts/copy-wasm.mjs
 public/sqlite3.wasm
+
+.env*.local

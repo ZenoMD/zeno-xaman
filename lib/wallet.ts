@@ -1,8 +1,7 @@
 import {
   initRailgun,
-  getShieldedBalance,
-  getShieldedTokens as getRawShieldedTokens,
-  WETH_ADDRESS,
+  getShieldedBalances,
+  resolveTokenMeta,
   XRPL_EVM_NETWORK,
 } from "./railgun";
 import { SqliteKV } from "./sqlite/kv";
@@ -12,27 +11,28 @@ import { getXumm } from "./xumm-client";
 import { fetchXrplTokens } from "./xrpl";
 import { shieldViaAxelar } from "./axelar";
 import { buildShieldPayload } from "./shield-payload";
+import { DEV_ACCOUNT } from "./dev-account";
 import {
   transferViaBroadcaster,
   unshieldViaBroadcaster,
 } from "./broadcaster";
-import { Mnemonic, sha256, formatEther, parseEther } from "ethers";
+import { Mnemonic, sha256, parseUnits } from "ethers";
 import type {
   LogFn,
   ShieldParams,
+  ShieldedTokenBalance,
   TransferParams,
   UnshieldParams,
   WalletApi,
 } from "./types";
 
-const NETWORK = XRPL_EVM_NETWORK;
+// Format a decimal amount string for display: up to 6 dp, trailing zeros trimmed.
+const trimAmount = (v: string): string => {
+  const n = Number(v);
+  return Number.isFinite(n) ? String(Number(n.toFixed(6))) : v;
+};
 
-// Human label for a shielded ERC20 address. The wrapped-native token is the
-// pool's XRP; anything else falls back to a shortened address.
-const shieldedTokenSymbol = (tokenAddress: string, networkName: string): string =>
-  tokenAddress.toLowerCase() === WETH_ADDRESS[networkName]?.toLowerCase()
-    ? "XRP"
-    : `${tokenAddress.slice(0, 6)}…${tokenAddress.slice(-4)}`;
+const NETWORK = XRPL_EVM_NETWORK;
 
 const withTimeout = <T>(
   promise: Promise<T>,
@@ -54,8 +54,8 @@ export type StartWalletCallbacks = {
   log: LogFn;
   /** the RAILGUN (0zk) address */
   onAddress: (addr: string) => void;
-  /** formatted WETH balance */
-  onBalance: (balance: string) => void;
+  /** all shielded token balances (XRP is just another entry) */
+  onShieldedTokens: (tokens: ShieldedTokenBalance[]) => void;
   /** shielded UTXO merkletree scan phase, once scanning actually begins */
   onScanState: (state: "scanning" | "complete") => void;
 };
@@ -68,7 +68,7 @@ export type StartWalletCallbacks = {
 export async function startWallet({
   log,
   onAddress,
-  onBalance,
+  onShieldedTokens,
   onScanState,
 }: StartWalletCallbacks): Promise<WalletApi> {
   log("Deriving shielded account…");
@@ -87,10 +87,24 @@ export async function startWallet({
   const db = new SqliteLevelDown(kv, "engine");
   const artifactStore = createSqliteArtifactStore(kv);
 
-  // Push the latest shielded XRP balance to the UI.
+  // Push the latest shielded balances to the UI as a single per-token list
+  // (labelled + decimals-aware), ordered highest balance first. XRP is just
+  // another entry.
   const render = () => {
-    const wei = getShieldedBalance(WETH_ADDRESS[NETWORK]);
-    onBalance(Number(formatEther(wei)).toFixed(4));
+    void pushShieldedTokens();
+  };
+
+  const pushShieldedTokens = async () => {
+    const balances = await getShieldedBalances(NETWORK);
+    onShieldedTokens(
+      balances
+        .map(({ address, symbol, formatted }) => ({
+          address,
+          symbol,
+          balance: trimAmount(formatted),
+        }))
+        .sort((a, b) => Number(b.balance) - Number(a.balance)),
+    );
   };
 
   // Only reveal the balance once it's actually been computed (the balance-update
@@ -154,25 +168,27 @@ export async function startWallet({
   // Private transfer: move shielded funds to another 0zk address via a RAILGUN
   // broadcaster (the proof is too large for an XRPL memo, so it goes over Waku
   // rather than Axelar). Funds stay in the pool; the broadcaster pays EVM gas.
-  const transfer = ({
+  const transfer = async ({
     recipientAddress,
     amount,
     tokenAddress,
     memoText,
-  }: TransferParams) =>
-    transferViaBroadcaster(
+  }: TransferParams) => {
+    const { decimals } = await resolveTokenMeta(tokenAddress, networkName);
+    return transferViaBroadcaster(
       {
         networkName,
         railgunWalletID: wallet.id,
         encryptionKey,
         recipientAddress,
         tokenAddress,
-        amount: parseEther(String(amount)),
+        amount: parseUnits(String(amount), decimals),
         memoText,
       },
       log,
       (pct) => log(`proof ${Math.round(pct * 100)}%`),
     );
+  };
 
   // Unshield: withdraw a shielded balance back to XRPL. Unshields to the RAILGUN
   // RelayAdapt contract, which multicalls the Axelar ITS to bridge the funds to
@@ -184,6 +200,7 @@ export async function startWallet({
     xrplRecipient,
   }: UnshieldParams) => {
     const recipient = xrplRecipient || (await fetchXrplTokens()).account;
+    const { decimals } = await resolveTokenMeta(tokenAddress, networkName);
     return unshieldViaBroadcaster(
       {
         networkName,
@@ -191,27 +208,26 @@ export async function startWallet({
         encryptionKey,
         xrplRecipient: recipient,
         tokenAddress,
-        amount: parseEther(String(amount)),
+        amount: parseUnits(String(amount), decimals),
       },
       log,
       (pct) => log(`proof ${Math.round(pct * 100)}%`),
     );
   };
 
-  // Snapshot the current shielded balances as pickable tokens for the Transfer
-  // tab. All shielded assets here are 18-decimal (native XRP is the only one
-  // today), so format with formatEther and label known addresses.
+  // Snapshot the current shielded balances as pickable tokens for the Transfer/
+  // Unshield tabs, labelled with each token's real symbol and formatted with its
+  // own decimals (via resolveTokenMeta) so non-18-decimal assets are correct.
   const getShieldedTokens = async () =>
-    getRawShieldedTokens().map(({ tokenAddress, amount }) => {
-      const symbol = shieldedTokenSymbol(tokenAddress, networkName);
-      return {
-        id: tokenAddress,
+    (await getShieldedBalances(networkName)).map(
+      ({ address, symbol, formatted }) => ({
+        id: address,
         currency: symbol,
         issuer: null,
-        balance: formatEther(amount),
+        balance: formatted,
         label: symbol,
-      };
-    });
+      }),
+    );
 
   return {
     railgunAddress: wallet.railgunAddress,
@@ -234,6 +250,13 @@ export async function startWallet({
 async function deriveShieldedAccount(
   log: LogFn,
 ): Promise<{ mnemonic: string; encryptionKey: string }> {
+  // Dev override: skip the Xaman sign-in and reuse a fixed wallet across
+  // reloads. Only set when `.env.local` provides the values (see dev-account.ts).
+  if (DEV_ACCOUNT) {
+    log("⚠️  DEV_ACCOUNT override active — skipping Xaman sign-in");
+    return DEV_ACCOUNT;
+  }
+
   const xumm = getXumm();
 
   const sub = await xumm.payload!.createAndSubscribe(

@@ -226,10 +226,13 @@ function AssetForm({
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result>(null);
 
-  // Default-select the first token once the list loads.
+  // Default-select the first selectable token once the list loads. Skip tokens
+  // the Axelar bridge can't accept (supported === false) so the form never
+  // opens on an unshieldable asset.
   useEffect(() => {
-    if (tokens.length && !tokens.some((t) => t.id === tokenId))
-      setTokenId(tokens[0].id);
+    const selectable = tokens.filter((t) => t.supported !== false);
+    if (selectable.length && !selectable.some((t) => t.id === tokenId))
+      setTokenId(selectable[0].id);
   }, [tokens, tokenId]);
 
   if (error) return <p className="panel__hint panel__hint--error">{error}</p>;
@@ -253,7 +256,12 @@ function AssetForm({
     recipientMode === "required" ||
     (recipientMode === "optional" && useAltRecipient);
   const recipientOk = !needRecipient || recipientValid;
-  const canSubmit = Boolean(selected) && amountOk && recipientOk && !busy;
+  const canSubmit =
+    Boolean(selected) &&
+    selected?.supported !== false &&
+    amountOk &&
+    recipientOk &&
+    !busy;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -293,8 +301,13 @@ function AssetForm({
                 <option value="">Loading…</option>
               ) : (
                 tokens.map((t) => (
-                  <option key={t.id} value={t.id}>
+                  <option
+                    key={t.id}
+                    value={t.id}
+                    disabled={t.supported === false}
+                  >
                     {t.label}
+                    {t.supported === false ? " — unsupported" : ""}
                   </option>
                 ))
               )}

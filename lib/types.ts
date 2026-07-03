@@ -11,11 +11,23 @@ export type XrplToken = {
   rawCurrency?: string;
   balance: string;
   label: string;
+  // Whether the Axelar bridge can accept this asset for shielding (must hold a TrustLine)
+  supported?: boolean;
 };
 
 export type XrplTokens = {
   account: string;
   tokens: XrplToken[];
+};
+
+/** A shielded (in-pool) balance for the multi-token balance card. */
+export type ShieldedTokenBalance = {
+  /** ERC20 address on the EVM sidechain (keys the RAILGUN balance). */
+  address: string;
+  /** Display symbol (XRP for the wrapped-native sentinel). */
+  symbol: string;
+  /** Human-formatted amount, scaled by the token's own decimals. */
+  balance: string;
 };
 
 export type ShieldParams = {
