@@ -43,6 +43,28 @@ const nextConfig = {
       ),
     );
 
+    // Swap @railgun-community/wallet's internal quick-sync dispatcher
+    // (quick-sync/quick-sync-events.js) — whose `quickSyncEventsGraph` the engine
+    // calls to bulk-fetch shielded history — for our shim, which serves that from
+    // our Goldsky-hosted RAILGUN V2 subgraph for XRPL EVM instead of throwing
+    // "No Graph API hosted service" and falling back to the slow per-499-block
+    // getLogs scan. The regex matches only the dispatcher, not the sibling
+    // quick-sync-events-graph-v2/v3.js. Scoped to the wallet package's import.
+    config.plugins.push(
+      new webpack.NormalModuleReplacementPlugin(
+        /quick-sync[\\/]quick-sync-events(\.js)?$/,
+        (resource) => {
+          const from = (resource.context || "").replace(/\\/g, "/");
+          if (from.includes("@railgun-community/wallet/dist")) {
+            resource.request = path.resolve(
+              __dirname,
+              "lib/railgun-quicksync-shim.ts",
+            );
+          }
+        },
+      ),
+    );
+
     // RAILGUN + snarkjs were written for Node, so polyfill the core modules they
     // reach for when bundled into the browser/worker (Parcel did this implicitly).
     if (!isServer) {
