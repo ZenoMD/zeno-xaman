@@ -76,6 +76,11 @@ body {
   justify-content: space-between;
 }
 
+.wallet__signin {
+  width: 100%;
+  margin-top: 12px;
+}
+
 .wallet__title {
   margin: 0;
   font-size: 22px;

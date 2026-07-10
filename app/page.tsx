@@ -71,8 +71,17 @@ function CopyableAddress({ address }: { address: string }) {
 }
 
 export default function Page() {
-  const { status, logs, shieldedTokens, scanState, address, error, api } =
-    useWallet();
+  const {
+    status,
+    logs,
+    shieldedTokens,
+    scanState,
+    address,
+    error,
+    api,
+    needsSignIn,
+    signIn,
+  } = useWallet();
 
   // Mirror Xaman's active palette (passed as the `xAppStyle` query param) onto
   // <html> so the theme-scoped CSS variables in globals.css take effect.
@@ -82,6 +91,36 @@ export default function Page() {
     ).toLowerCase();
     document.documentElement.dataset.theme = theme;
   }, []);
+
+  if (needsSignIn) {
+    return (
+      <main className="wallet">
+        <section className="balance-card">
+          <p className="balance-card__label">Shielded wallet</p>
+          <p className="balance-card__empty">
+            Sign in with your Xaman wallet to access your shielded account.
+          </p>
+          <button
+            type="button"
+            className="btn wallet__signin"
+            onClick={signIn}
+          >
+            Sign in with Xaman
+          </button>
+          {error ? (
+            <p className="panel__hint panel__hint--error">{error.message}</p>
+          ) : null}
+        </section>
+
+        <p className="status">{status}</p>
+
+        <details className="log">
+          <summary>Logs</summary>
+          <pre>{logs.join("\n")}</pre>
+        </details>
+      </main>
+    );
+  }
 
   return (
     <main className="wallet">

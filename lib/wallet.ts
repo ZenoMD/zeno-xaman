@@ -239,9 +239,12 @@ export async function startWallet({
     transfer,
     unshield,
     // Regular <a> links don't escape the xApp WebView; route external URLs
-    // (e.g. Axelarscan) through the Xaman xApp browser instead.
+    // (e.g. Axelarscan) through the Xaman xApp browser instead. In a regular
+    // browser there is no xApp bridge, so just open a new tab.
     openBrowser: (url: string) => {
-      getXumm().xapp?.openBrowser({ url });
+      const xumm = getXumm();
+      if (xumm.runtime.xapp) xumm.xapp?.openBrowser({ url });
+      else window.open(url, "_blank", "noopener,noreferrer");
     },
     stop: () => clearInterval(timer),
   };
@@ -271,8 +274,17 @@ async function deriveShieldedAccount(
     },
   );
 
-  // Open it natively on the same device instead of showing a QR.
-  await xumm.xapp!.openSignRequest({ uuid: sub.created.uuid });
+  // Present the sign request. Inside the Xaman xApp we can open it natively on
+  // the same device; in a regular browser (Xaman "browser/web3" mode) there is
+  // no xApp bridge, so open the hosted sign page — it deep-links into Xaman on
+  // mobile and shows a QR to scan on desktop.
+  if (xumm.runtime.xapp) {
+    await xumm.xapp!.openSignRequest({ uuid: sub.created.uuid });
+  } else {
+    const signUrl = sub.created.next.always;
+    const opened = window.open(signUrl, "_blank", "noopener,noreferrer");
+    if (!opened) log(`Open this link in Xaman to sign in: ${signUrl}`);
+  }
 
   const resolved = (await sub.resolved) as any; // this is event.data
   if (!resolved.signed) throw new Error("User declined sign-in");
