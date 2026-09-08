@@ -1,5 +1,6 @@
 import { getXumm } from "./xumm-client";
 import { AXELAR_GATEWAY } from "./axelar";
+import { compareForPicker } from "./tokens";
 import type { XrplToken, XrplTokens } from "./types";
 
 // Read the connected XRPL wallet's holdings straight off the ledger. The xumm
@@ -124,6 +125,16 @@ export async function fetchXrplTokens(): Promise<XrplTokens> {
   }
 
   await markAxelarSupport(wsUrl, tokens);
+
+  // Same picker order as the shielded list (getShieldedBalances): XRP first,
+  // then by balance. XRP is pushed first above, but trustlines arrive in ledger
+  // order, so sort rather than rely on it.
+  tokens.sort((a, b) =>
+    compareForPicker(
+      { symbol: a.currency, balance: a.balance },
+      { symbol: b.currency, balance: b.balance },
+    ),
+  );
 
   return { account, tokens };
 }

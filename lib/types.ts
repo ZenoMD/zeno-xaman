@@ -2,6 +2,9 @@
 
 export type LogFn = (msg: string) => void;
 
+/** The three directions the wallet can move funds in; one tab each. */
+export type TabId = "shield" | "transfer" | "unshield";
+
 /** A spendable asset in the connected XRPL wallet (see fetchXrplTokens). */
 export type XrplToken = {
   id: string;
@@ -54,6 +57,56 @@ export type UnshieldParams = {
   xrplRecipient?: string;
 };
 
+/** One priced cost inside a FeeQuote, in its own denomination. */
+export type FeeLine = {
+  /** What the cost is, e.g. "Axelar bridge gas". */
+  label: string;
+  /** Human-formatted magnitude, always positive. */
+  amount: string;
+  /**
+   * This line's denomination, which is not always the quote's `symbol` — the
+   * unshield's return relay gas is native XRP whatever token is moving.
+   */
+  symbol: string;
+  /**
+   * `added`: charged on top, so the source pays `amount + this`.
+   * `deducted`: taken out of the amount in flight, so less arrives.
+   */
+  kind: "added" | "deducted";
+};
+
+/**
+ * The full cost of moving `amount` through one flow, ending in what the
+ * destination actually receives. Produced by `WalletApi.quoteFees` and safe to
+ * request on every keystroke (see lib/fees.ts for the caching).
+ */
+export type FeeQuote = {
+  flow: TabId;
+  /** The amount quoted, echoed back. */
+  amount: string;
+  /** Denomination of `amount`, `sends` and `receives`. */
+  symbol: string;
+  /** Every cost found, in the order the money meets them. */
+  lines: FeeLine[];
+  /** Total leaving the source: `amount` plus every `added` line in `symbol`. */
+  sends: string;
+  /** What lands at the destination: `amount` minus every `deducted` line. */
+  receives: string;
+  /**
+   * Set when a component could not be priced (no broadcaster online, Axelar
+   * won't price the token, an RPC read failed). `sends` and `receives` then
+   * simply omit that cost, so both are optimistic — show this message rather
+   * than presenting them as the final numbers.
+   */
+  incomplete?: string;
+};
+
+/** What to quote: mirrors the params of the matching WalletApi action. */
+export type FeeQuoteParams =
+  | { flow: "shield"; tokenId: string; amount: string }
+  | { flow: "transfer"; tokenAddress: string; amount: string }
+  | { flow: "unshield"; tokenAddress: string; amount: string };
+
 /** The wallet controller returned by startWallet() and consumed by the UI. */
 export type WalletApi = {
   railgunAddress: string;
@@ -65,6 +118,13 @@ export type WalletApi = {
   transfer: (params: TransferParams) => Promise<{ txHash: string }>;
   /** Unshield a pool balance back to XRPL via RelayAdapt + Axelar ITS. */
   unshield: (params: UnshieldParams) => Promise<{ txHash: string }>;
+  /**
+   * Price a flow: every fee between the entered amount and what the destination
+   * receives. Cached and single-flighted, so it is safe to call as the user
+   * types; it only throws when there is no quote at all (unknown token, amount
+   * not a positive number). A partial quote comes back with `incomplete` set.
+   */
+  quoteFees: (params: FeeQuoteParams) => Promise<FeeQuote>;
   /** Open an external URL in the device browser via the Xaman xApp SDK. */
   openBrowser: (url: string) => void;
   stop: () => void;

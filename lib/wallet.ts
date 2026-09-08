@@ -12,27 +12,28 @@ import { fetchXrplTokens } from "./xrpl";
 import { shieldViaAxelar } from "./axelar";
 import { buildShieldPayload } from "./shield-payload";
 import { DEV_ACCOUNT } from "./dev-account";
-import {
-  transferViaBroadcaster,
-  unshieldViaBroadcaster,
-} from "./broadcaster";
+import { trimAmount } from "./tokens";
+import { transferViaBroadcaster, unshieldViaBroadcaster } from "./broadcaster";
+import { quoteFees, type FeeQuoteContext } from "./fees";
 import { Mnemonic, sha256, parseUnits } from "ethers";
 import type {
+  FeeQuoteParams,
   LogFn,
   ShieldParams,
   ShieldedTokenBalance,
   TransferParams,
   UnshieldParams,
   WalletApi,
+  XrplTokens,
 } from "./types";
 
-// Format a decimal amount string for display: up to 6 dp, trailing zeros trimmed.
-const trimAmount = (v: string): string => {
-  const n = Number(v);
-  return Number.isFinite(n) ? String(Number(n.toFixed(6))) : v;
-};
-
 const NETWORK = XRPL_EVM_NETWORK;
+
+// A fee quote runs while the user types, and fetchXrplTokens opens a WebSocket
+// to the ledger every call — so quotes read a short-lived snapshot instead. Only
+// the token's issuer/currency code and the account address are taken from it;
+// both are stable for the session. Submissions still read the ledger fresh.
+const XRPL_SNAPSHOT_MS = 30_000;
 
 const withTimeout = <T>(
   promise: Promise<T>,
@@ -88,8 +89,8 @@ export async function startWallet({
   const artifactStore = createSqliteArtifactStore(kv);
 
   // Push the latest shielded balances to the UI as a single per-token list
-  // (labelled + decimals-aware), ordered highest balance first. XRP is just
-  // another entry.
+  // (labelled + decimals-aware), in getShieldedBalances' picker order: XRP
+  // first, then highest balance.
   const render = () => {
     void pushShieldedTokens();
   };
@@ -97,13 +98,11 @@ export async function startWallet({
   const pushShieldedTokens = async () => {
     const balances = await getShieldedBalances(NETWORK);
     onShieldedTokens(
-      balances
-        .map(({ address, symbol, formatted }) => ({
-          address,
-          symbol,
-          balance: trimAmount(formatted),
-        }))
-        .sort((a, b) => Number(b.balance) - Number(a.balance)),
+      balances.map(({ address, symbol, formatted }) => ({
+        address,
+        symbol,
+        balance: trimAmount(formatted),
+      })),
     );
   };
 
@@ -215,6 +214,44 @@ export async function startWallet({
     );
   };
 
+  // Cached XRPL read for the quote path (see XRPL_SNAPSHOT_MS). Single-flighted
+  // so a burst of keystrokes opens one socket, not one each.
+  let snapshot: { value: XrplTokens; at: number } | undefined;
+  let snapshotInFlight: Promise<XrplTokens> | undefined;
+  const xrplSnapshot = (): Promise<XrplTokens> => {
+    if (snapshot && Date.now() - snapshot.at < XRPL_SNAPSHOT_MS) {
+      return Promise.resolve(snapshot.value);
+    }
+    snapshotInFlight ??= fetchXrplTokens()
+      .then((value) => {
+        snapshot = { value, at: Date.now() };
+        return value;
+      })
+      .finally(() => {
+        snapshotInFlight = undefined;
+      });
+    return snapshotInFlight;
+  };
+
+  // Live fee breakdown for the amount in a form. Quote logs go to the console
+  // only — the activity log is for things the user asked for, not for repricing
+  // on every keystroke.
+  const feeContext: FeeQuoteContext = {
+    networkName,
+    railgunWalletID: wallet.id,
+    encryptionKey,
+    railgunAddress: wallet.railgunAddress,
+    resolveXrplToken: async (tokenId: string) => {
+      const { tokens } = await xrplSnapshot();
+      const token = tokens.find((t) => t.id === tokenId);
+      if (!token) throw new Error(`Token ${tokenId} not found in XRPL wallet`);
+      return token;
+    },
+    getXrplAccount: async () => (await xrplSnapshot()).account,
+    // eslint-disable-next-line no-console
+    log: (msg: string) => console.log("[quote]", msg),
+  };
+
   // Snapshot the current shielded balances as pickable tokens for the Transfer/
   // Unshield tabs, labelled with each token's real symbol and formatted with its
   // own decimals (via resolveTokenMeta) so non-18-decimal assets are correct.
@@ -238,6 +275,7 @@ export async function startWallet({
     shield,
     transfer,
     unshield,
+    quoteFees: (params: FeeQuoteParams) => quoteFees(feeContext, params),
     // Regular <a> links don't escape the xApp WebView; route external URLs
     // (e.g. Axelarscan) through the Xaman xApp browser instead. In a regular
     // browser there is no xApp bridge, so just open a new tab.

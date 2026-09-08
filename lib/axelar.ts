@@ -19,7 +19,7 @@ const XRP_DROPS = 1_000_000;
 
 // Sum two XRPL decimal-string amounts, trimming binary-float noise to XRPL's
 // 15-significant-digit precision (e.g. addDecimal("0.1","0.2") === "0.3").
-const addDecimal = (a: string, b: string): string =>
+export const addDecimal = (a: string, b: string): string =>
   String(Number((Number(a) + Number(b)).toPrecision(15)));
 
 // ASCII → lowercase hex. XRPL memo fields are hex blobs.
@@ -126,7 +126,17 @@ const GAS_MULTIPLIER = 1.5;
 // The estimate barely moves between blocks; cache briefly so we don't hit the
 // API on every amount keystroke.
 const GAS_CACHE_MS = 60_000;
-const gasCache = new Map<string, { fee: string; at: number }>();
+const gasCache = new Map<string, { quote: ShieldGasQuote; at: number }>();
+
+export type ShieldGasQuote = {
+  /**
+   * The `gas_fee_amount` memo value: integer drops for XRP, a decimal string in
+   * the currency's own units for an IOU.
+   */
+  memoAmount: string;
+  /** The same fee as a human amount of the token (XRP rather than drops). */
+  human: string;
+};
 
 // Map an XRPL token to the symbol Axelar's gas API prices. XRP is native; issued
 // currencies use their display code minus any axl prefix/suffix.
@@ -136,21 +146,24 @@ const axelarGasSymbol = (token: XrplToken): string =>
     : token.currency.replace(/\.axl$/i, "").replace(/^axl/i, "");
 
 /**
- * Estimate the Axelar relay gas for shielding `token`, returned in that token's
- * gas_fee_amount denomination (integer drops for XRP, a decimal string for an
- * IOU). THROWS if Axelar can't return a plausible price (it returns 0 for tokens
- * it doesn't price, e.g. WBTC) — there is deliberately no hardcoded fallback,
- * since a fixed budget could massively overpay for a high-value token (0.5 WBTC
- * as gas). A failed estimate aborts the shield rather than guessing.
+ * Estimate the Axelar relay gas for shielding `token`, in both the
+ * gas_fee_amount memo denomination and a human amount of the token. THROWS if
+ * Axelar can't return a plausible price (it returns 0 for tokens it doesn't
+ * price, e.g. WBTC) — there is deliberately no hardcoded fallback, since a fixed
+ * budget could massively overpay for a high-value token (0.5 WBTC as gas). A
+ * failed estimate aborts the shield rather than guessing.
+ *
+ * Shared by the shield itself and the fee quote shown while the user types
+ * (lib/fees.ts), so the two can never disagree; both hit the same 60s cache.
  */
-async function estimateShieldGas(
+export async function estimateShieldGas(
   token: XrplToken,
   log: LogFn = console.log,
-): Promise<string> {
+): Promise<ShieldGasQuote> {
   const isXrp = !token.issuer;
   const symbol = axelarGasSymbol(token);
   const cached = gasCache.get(symbol);
-  if (cached && Date.now() - cached.at < GAS_CACHE_MS) return cached.fee;
+  if (cached && Date.now() - cached.at < GAS_CACHE_MS) return cached.quote;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
@@ -190,12 +203,17 @@ async function estimateShieldGas(
     // totalFee is in the source token's smallest units. XRP's smallest unit IS
     // the drop (the gas_fee_amount denomination); an IOU needs scaling by its
     // decimals into a decimal string.
-    const fee = isXrp
+    const memoAmount = isXrp
       ? String(Math.round(units))
       : formatUnits(BigInt(totalFee), decimals);
-    gasCache.set(symbol, { fee, at: Date.now() });
-    log(`Axelar gas estimate (${symbol}): ${fee}`);
-    return fee;
+    const quote: ShieldGasQuote = {
+      memoAmount,
+      // The IOU memo is already a human amount; drops are not.
+      human: isXrp ? String(Math.round(units) / XRP_DROPS) : memoAmount,
+    };
+    gasCache.set(symbol, { quote, at: Date.now() });
+    log(`Axelar gas estimate (${symbol}): ${memoAmount}`);
+    return quote;
   } catch (e) {
     const detail = (e as Error).message;
     log(`Axelar gas estimate failed (${symbol}): ${detail}`);
@@ -225,7 +243,7 @@ async function buildShieldPayment(
   // `amount + gas`; Axelar deducts the gas_fee_amount memo for relay and
   // forwards the remainder. `estimateShieldGas` returns the fee already in this
   // token's memo denomination (integer drops for XRP, decimal units for an IOU).
-  const gasFee = await estimateShieldGas(token, log);
+  const { memoAmount: gasFee } = await estimateShieldGas(token, log);
 
   let Amount: string | IssuedAmount;
   if (isXrp) {

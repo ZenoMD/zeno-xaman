@@ -20,6 +20,7 @@ import { POI } from "@railgun-community/engine";
 import * as snarkjs from "snarkjs";
 import { Contract, JsonRpcProvider, formatUnits } from "ethers";
 import type { SqliteLevelDown } from "./sqlite/leveldown";
+import { compareForPicker } from "./tokens";
 import type { LogFn } from "./types";
 
 type RailgunWallet = Awaited<ReturnType<typeof createRailgunWallet>>;
@@ -181,10 +182,11 @@ export async function resolveTokenMeta(
   if (cached) return cached;
 
   const wrapped = (
-    (NETWORK_CONFIG as Record<string, { baseToken?: { wrappedAddress?: string } }>)[
-      networkName
-    ]
-  )?.baseToken?.wrappedAddress?.toLowerCase();
+    NETWORK_CONFIG as Record<
+      string,
+      { baseToken?: { wrappedAddress?: string } }
+    >
+  )[networkName]?.baseToken?.wrappedAddress?.toLowerCase();
 
   let meta: { symbol: string; decimals: number };
   if (key === WETH_ADDRESS[networkName]?.toLowerCase() || key === wrapped) {
@@ -214,13 +216,14 @@ export async function resolveTokenMeta(
 
 /**
  * Every shielded token with a positive balance, decorated with its symbol and
- * human-formatted amount (scaled by the token's own decimals). Backs the
- * multi-token balance card.
+ * human-formatted amount (scaled by the token's own decimals). Ordered for the
+ * pickers that render it: XRP first, then by balance. Backs the header card and
+ * the Transfer/Unshield token lists.
  */
 export async function getShieldedBalances(
   networkName: string,
 ): Promise<{ address: string; symbol: string; formatted: string }[]> {
-  return Promise.all(
+  const balances = await Promise.all(
     getShieldedTokens().map(async ({ tokenAddress, amount }) => {
       const { symbol, decimals } = await resolveTokenMeta(
         tokenAddress,
@@ -232,6 +235,12 @@ export async function getShieldedBalances(
         formatted: formatUnits(amount, decimals),
       };
     }),
+  );
+  return balances.sort((a, b) =>
+    compareForPicker(
+      { symbol: a.symbol, balance: a.formatted },
+      { symbol: b.symbol, balance: b.formatted },
+    ),
   );
 }
 

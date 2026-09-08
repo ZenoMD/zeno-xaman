@@ -28,6 +28,7 @@ import {
   type RailgunERC20AmountRecipient,
 } from "@railgun-community/shared-models";
 import { buildUnshieldCrossContractCalls, RETURN_GAS_VALUE } from "./its";
+import { feeFromValue, getPoolFeeBasisPoints } from "./pool-fees";
 import type { LogFn } from "./types";
 
 const TXID = TXIDVersion.V2_PoseidonMerkle;
@@ -126,6 +127,11 @@ export async function stopBroadcasterClient(
   }
 }
 
+// How long a submission waits for a broadcaster's fee message to arrive over
+// Waku. A fee quote passes something much shorter — it would rather come back
+// incomplete than block the form.
+export const BROADCASTER_WAIT_MS = 45000;
+
 // Poll for a broadcaster willing to accept `tokenAddress` as its fee token.
 // Fees arrive over Waku after connecting, so this isn't available immediately.
 async function waitForBroadcaster(
@@ -133,7 +139,7 @@ async function waitForBroadcaster(
   tokenAddress: string,
   useRelayAdapt: boolean,
   log: LogFn,
-  timeoutMs = 45000,
+  timeoutMs = BROADCASTER_WAIT_MS,
 ): Promise<SelectedBroadcaster> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -188,15 +194,39 @@ export type TransferViaBroadcasterParams = {
   amount: bigint;
   /** optional private memo */
   memoText?: string;
+  /**
+   * How long to wait for a broadcaster's fee message. Defaults to the
+   * submission wait; a fee quote passes a short one so the form isn't blocked.
+   */
+  broadcasterWaitMs?: number;
 };
 
 /**
- * Private (shielded) transfer via a RAILGUN broadcaster. Estimates the fee,
- * proves the transfer in-WebView, then hands the proved `transact` calldata to
- * the broadcaster over Waku — the broadcaster submits it on XRPL EVM and takes
- * its fee from the shielded amount. Nothing touches XRPL / Xaman.
+ * Everything priced before a proof is generated: the selected broadcaster, the
+ * gas details its fee is derived from, and the fee itself. Produced once and
+ * used by both the fee quote and the transaction it quotes, so the two can never
+ * disagree.
  */
-export async function transferViaBroadcaster(
+export type BroadcasterFeeQuote = {
+  broadcaster: SelectedBroadcaster;
+  feeTokenDetails: FeeTokenDetails;
+  /** Gas details with `gasEstimate` filled in — what the fee is computed from. */
+  gasDetails: TransactionGasDetails;
+  overallBatchMinGasPrice: bigint;
+  /** EVM gas the broadcaster charges, in fee-token base units. */
+  gasFee: bigint;
+  /** Everything the broadcaster is paid, in fee-token base units. */
+  totalFee: bigint;
+  /** The fee as an addressed output to the broadcaster's 0zk address. */
+  feeRecipient: RailgunERC20AmountRecipient;
+};
+
+/**
+ * Select a broadcaster and price a private transfer: gas estimate + the fee that
+ * broadcaster charges for it, in the transferred token. Everything up to (but
+ * not including) proof generation, so a quote costs no snarkjs work.
+ */
+export async function prepareTransfer(
   {
     networkName,
     railgunWalletID,
@@ -205,10 +235,14 @@ export async function transferViaBroadcaster(
     tokenAddress,
     amount,
     memoText,
+    broadcasterWaitMs,
   }: TransferViaBroadcasterParams,
   log: LogFn = console.log,
-  onProgress: (pct: number) => void = () => {},
-): Promise<{ txHash: string }> {
+): Promise<
+  BroadcasterFeeQuote & {
+    erc20AmountRecipients: RailgunERC20AmountRecipient[];
+  }
+> {
   if (!recipientAddress?.startsWith("0zk")) {
     throw new Error("Recipient must be a 0zk RAILGUN address");
   }
@@ -225,6 +259,7 @@ export async function transferViaBroadcaster(
     tokenAddress,
     useRelayAdapt,
     log,
+    broadcasterWaitMs,
   );
   log(`Broadcaster ${broadcaster.railgunAddress.slice(0, 12)}… selected`);
 
@@ -259,15 +294,53 @@ export async function transferViaBroadcaster(
   } as TransactionGasDetails;
   const overallBatchMinGasPrice = calculateGasPrice(gasDetails);
 
-  // 2) Broadcaster fee (in the shielded token), paid to its 0zk address.
+  // 2) Broadcaster fee (in the shielded token), paid to its 0zk address. It is
+  //    an extra output, so the recipient still receives the full `amount`.
   const broadcasterFeeERC20Amount = calculateBroadcasterFeeERC20Amount(
     feeTokenDetails,
     gasDetails,
   );
-  const broadcasterFeeERC20AmountRecipient: RailgunERC20AmountRecipient = {
+  const feeRecipient: RailgunERC20AmountRecipient = {
     ...broadcasterFeeERC20Amount,
     recipientAddress: broadcaster.railgunAddress,
   };
+
+  return {
+    broadcaster,
+    feeTokenDetails,
+    gasDetails,
+    overallBatchMinGasPrice,
+    gasFee: broadcasterFeeERC20Amount.amount,
+    totalFee: broadcasterFeeERC20Amount.amount,
+    feeRecipient,
+    erc20AmountRecipients,
+  };
+}
+
+/**
+ * Private (shielded) transfer via a RAILGUN broadcaster. Estimates the fee,
+ * proves the transfer in-WebView, then hands the proved `transact` calldata to
+ * the broadcaster over Waku — the broadcaster submits it on XRPL EVM and takes
+ * its fee from the shielded amount. Nothing touches XRPL / Xaman.
+ */
+export async function transferViaBroadcaster(
+  params: TransferViaBroadcasterParams,
+  log: LogFn = console.log,
+  onProgress: (pct: number) => void = () => {},
+): Promise<{ txHash: string }> {
+  const { networkName, railgunWalletID, encryptionKey, memoText } = params;
+  const chain = chainForNetwork(networkName);
+  const sendWithPublicWallet = false; // a broadcaster submits it, not us
+  const useRelayAdapt = false; // plain transfer, no RelayAdapt
+
+  // 1) + 2) Broadcaster, gas estimate and fee — the same call the fee quote makes.
+  const {
+    broadcaster,
+    gasDetails,
+    overallBatchMinGasPrice,
+    feeRecipient: broadcasterFeeERC20AmountRecipient,
+    erc20AmountRecipients,
+  } = await prepareTransfer(params, log);
 
   // 3) Prove the transfer (heavy snarkjs work, single-threaded in the WebView).
   log("Generating transfer proof…");
@@ -330,16 +403,6 @@ export async function transferViaBroadcaster(
 // ITS interchainTransfer can't run out mid-call. RAILGUN's recommended floor.
 const RELAY_ADAPT_MIN_GAS_LIMIT = 2_800_000n;
 
-// The pool deducts an unshield fee from every unshield, so the RelayAdapt only
-// ever receives `amount - fee`. The ITS transfer must bridge exactly what the
-// RelayAdapt will hold — bridging the gross `amount` over-requests and reverts
-// the interchainTransfer burn. Hardcoded to the deployment's unshield fee.
-const UNSHIELD_FEE_BASIS_POINTS = 10n;
-
-// Mirrors UnshieldNote.getAmountFeeFromValue: fee = value * bp / 10000.
-const amountAfterUnshieldFee = (value: bigint): bigint =>
-  value - (value * UNSHIELD_FEE_BASIS_POINTS) / 10000n;
-
 export type UnshieldViaBroadcasterParams = {
   networkName: NetworkName;
   railgunWalletID: string;
@@ -350,17 +413,35 @@ export type UnshieldViaBroadcasterParams = {
   tokenAddress: string;
   /** amount in base units */
   amount: bigint;
+  /**
+   * How long to wait for a broadcaster's fee message. Defaults to the
+   * submission wait; a fee quote passes a short one so the form isn't blocked.
+   */
+  broadcasterWaitMs?: number;
+};
+
+/** What `prepareUnshield` produces on top of the broadcaster fee. */
+export type UnshieldPlan = BroadcasterFeeQuote & {
+  /** Pool unshield fee, in the unshielded token's base units. */
+  unshieldFee: bigint;
+  /** What actually reaches XRPL: `amount - unshieldFee`. */
+  bridgeAmount: bigint;
+  /** Native XRP the broadcaster fronts for the return relay, reimbursed in the fee. */
+  returnGasValue: bigint;
+  relayAdaptUnshieldERC20Amounts: RailgunERC20Amount[];
+  relayAdaptShieldERC20Recipients: RailgunERC20Recipient[];
+  crossContractCalls: Parameters<
+    typeof gasEstimateForUnprovenCrossContractCalls
+  >[8];
 };
 
 /**
- * Unshield to XRPL via a RAILGUN broadcaster + RelayAdapt cross-contract call.
- * Unshields `amount` from the pool into the RelayAdapt contract, which then runs
- * a multicall that hands the funds to the Axelar ITS to bridge back to the XRPL
- * account holder. The proof binds the RelayAdapt address (adaptAddress) and the
- * exact calls, so the broadcaster can only submit this transaction as-proved.
- * The broadcaster pays EVM gas and takes its fee from the shielded balance.
+ * Select a broadcaster and price an unshield-to-XRPL: the pool's unshield fee,
+ * the amount that survives it, the gas estimate for the RelayAdapt multicall and
+ * the broadcaster's fee for submitting it. Everything up to (but not including)
+ * proof generation, so a quote costs no snarkjs work.
  */
-export async function unshieldViaBroadcaster(
+export async function prepareUnshield(
   {
     networkName,
     railgunWalletID,
@@ -368,10 +449,10 @@ export async function unshieldViaBroadcaster(
     xrplRecipient,
     tokenAddress,
     amount,
+    broadcasterWaitMs,
   }: UnshieldViaBroadcasterParams,
   log: LogFn = console.log,
-  onProgress: (pct: number) => void = () => {},
-): Promise<{ txHash: string }> {
+): Promise<UnshieldPlan> {
   const chain = chainForNetwork(networkName);
   const sendWithPublicWallet = false; // a broadcaster submits it, not us
   const useRelayAdapt = true; // unshield routes through the RelayAdapt contract
@@ -384,6 +465,7 @@ export async function unshieldViaBroadcaster(
     tokenAddress,
     useRelayAdapt,
     log,
+    broadcasterWaitMs,
   );
   log(`Broadcaster ${broadcaster.railgunAddress.slice(0, 12)}… selected`);
 
@@ -399,8 +481,17 @@ export async function unshieldViaBroadcaster(
   ];
   const relayAdaptShieldERC20Recipients: RailgunERC20Recipient[] = [];
 
-  // The RelayAdapt receives `amount - fee`, so the ITS transfer bridges the net.
-  const bridgeAmount = amountAfterUnshieldFee(amount);
+  // The pool deducts an unshield fee from every unshield, so the RelayAdapt only
+  // ever receives `amount - fee`. The ITS transfer must bridge exactly what the
+  // RelayAdapt will hold — bridging the gross `amount` over-requests and reverts
+  // the interchainTransfer burn. Read the rate off the pool rather than
+  // hardcoding it, so the quote and the transaction use the same number.
+  const { unshield: unshieldFeeBasisPoints } =
+    await getPoolFeeBasisPoints(networkName);
+  const { amount: bridgeAmount, fee: unshieldFee } = feeFromValue(
+    amount,
+    unshieldFeeBasisPoints,
+  );
   log(`Bridging ${bridgeAmount} of ${amount} (after unshield fee) → XRPL`);
 
   // The multicall the RelayAdapt runs while holding the unshielded funds: hand
@@ -467,11 +558,57 @@ export async function unshieldViaBroadcaster(
     feeTokenDetails,
     gasDetails,
   );
-  const broadcasterFeeERC20AmountRecipient: RailgunERC20AmountRecipient = {
+  const feeRecipient: RailgunERC20AmountRecipient = {
     tokenAddress: broadcasterFeeERC20Amount.tokenAddress,
     amount: broadcasterFeeERC20Amount.amount + RETURN_GAS_VALUE,
     recipientAddress: broadcaster.railgunAddress,
   };
+
+  return {
+    broadcaster,
+    feeTokenDetails,
+    gasDetails,
+    overallBatchMinGasPrice,
+    gasFee: broadcasterFeeERC20Amount.amount,
+    totalFee: feeRecipient.amount,
+    feeRecipient,
+    unshieldFee,
+    bridgeAmount,
+    returnGasValue: RETURN_GAS_VALUE,
+    relayAdaptUnshieldERC20Amounts,
+    relayAdaptShieldERC20Recipients,
+    crossContractCalls,
+  };
+}
+
+/**
+ * Unshield to XRPL via a RAILGUN broadcaster + RelayAdapt cross-contract call.
+ * Unshields `amount` from the pool into the RelayAdapt contract, which then runs
+ * a multicall that hands the funds to the Axelar ITS to bridge back to the XRPL
+ * account holder. The proof binds the RelayAdapt address (adaptAddress) and the
+ * exact calls, so the broadcaster can only submit this transaction as-proved.
+ * The broadcaster pays EVM gas and takes its fee from the shielded balance.
+ */
+export async function unshieldViaBroadcaster(
+  params: UnshieldViaBroadcasterParams,
+  log: LogFn = console.log,
+  onProgress: (pct: number) => void = () => {},
+): Promise<{ txHash: string }> {
+  const { networkName, railgunWalletID, encryptionKey } = params;
+  const chain = chainForNetwork(networkName);
+  const sendWithPublicWallet = false; // a broadcaster submits it, not us
+  const useRelayAdapt = true; // unshield routes through the RelayAdapt contract
+
+  // 1) + 2) Broadcaster, gas estimate and fees — the same call the quote makes.
+  const {
+    broadcaster,
+    gasDetails,
+    overallBatchMinGasPrice,
+    feeRecipient: broadcasterFeeERC20AmountRecipient,
+    relayAdaptUnshieldERC20Amounts,
+    relayAdaptShieldERC20Recipients,
+    crossContractCalls,
+  } = await prepareUnshield(params, log);
 
   // 3) Prove the cross-contract calls (heavy snarkjs work in the WebView). This
   //    binds the RelayAdapt adaptAddress + the exact calls into the proof.
