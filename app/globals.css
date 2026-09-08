@@ -129,6 +129,13 @@ body {
   gap: var(--space-xl);
 }
 
+/* body stretches this column to the full viewport height, so in a short window
+   its children would shrink to fit - squashing the header card until its balance
+   is clipped. They keep their intrinsic height and the page scrolls instead. */
+.wallet > * {
+  flex-shrink: 0;
+}
+
 .wallet__header {
   display: flex;
   align-items: center;
