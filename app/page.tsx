@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useWallet } from "../lib/use-wallet";
 import { WalletTabs } from "../components/wallet-tabs";
 import CopyIcon from "../components/icons/copy.svg";
@@ -83,15 +83,6 @@ export default function Page() {
     signIn,
   } = useWallet();
 
-  // Mirror Xaman's active palette (passed as the `xAppStyle` query param) onto
-  // <html> so the theme-scoped CSS variables in globals.css take effect.
-  useEffect(() => {
-    const theme = (
-      new URLSearchParams(window.location.search).get("xAppStyle") || "light"
-    ).toLowerCase();
-    document.documentElement.dataset.theme = theme;
-  }, []);
-
   if (needsSignIn) {
     return (
       <main className="wallet">
@@ -100,11 +91,7 @@ export default function Page() {
           <p className="balance-card__empty">
             Sign in with your Xaman wallet to access your shielded account.
           </p>
-          <button
-            type="button"
-            className="btn wallet__signin"
-            onClick={signIn}
-          >
+          <button type="button" className="btn wallet__signin" onClick={signIn}>
             Sign in with Xaman
           </button>
           {error ? (
