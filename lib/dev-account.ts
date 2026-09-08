@@ -20,3 +20,17 @@ const encryptionKey = process.env.NEXT_PUBLIC_DEV_ENCRYPTION_KEY;
 
 export const DEV_ACCOUNT: DevAccount | null =
   mnemonic && encryptionKey ? { mnemonic, encryptionKey } : null;
+
+/**
+ * Dev-only XRPL account (an r-address) to read public balances from, skipping
+ * the Xaman session entirely. DEV_ACCOUNT alone is not enough on desktop: it
+ * replaces the shielded keys, but the XRPL identity normally comes from the
+ * Xaman session, and with no session `xumm.user.account` never settles - the
+ * public balance hangs on "loading" forever. Set this to your own r-address to
+ * develop against real balances without signing in.
+ *
+ * Read-only: an r-address is public, and every action that MOVES funds (the
+ * shield Payment, unshield) still needs a real Xaman session to sign.
+ */
+export const DEV_XRPL_ACCOUNT: string | null =
+  process.env.NEXT_PUBLIC_DEV_XRPL_ACCOUNT || null;

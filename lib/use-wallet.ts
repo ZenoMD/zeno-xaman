@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { DEV_ACCOUNT } from "./dev-account";
+import { DEV_ACCOUNT, DEV_XRPL_ACCOUNT } from "./dev-account";
 import { isXappRuntime } from "./runtime";
 import type { ShieldedTokenBalance, WalletApi } from "./types";
 
@@ -124,13 +124,19 @@ export function useWallet(): UseWalletState {
         });
     };
 
-    // Inside the Xaman xApp (or with a dev-account override) the session is set
-    // up automatically, so boot straight away. In a regular browser we follow
-    // Xaman's "browser/web3" flow: construct the SDK, let it restore any existing
-    // 24h session, and boot when a session is available — otherwise show a
-    // "Sign in" button that starts the OAuth2 flow.
-    // https://docs.xaman.dev/environments/browser-web3
-    if (DEV_ACCOUNT || isXappRuntime()) {
+    // Inside the Xaman xApp the session is set up automatically, so boot
+    // straight away. In a regular browser we follow Xaman's "browser/web3"
+    // flow: construct the SDK, let it restore any existing 24h session, and
+    // boot when a session is available — otherwise show a "Sign in" button that
+    // starts the OAuth2 flow. https://docs.xaman.dev/environments/browser-web3
+    //
+    // The dev overrides only skip sign-in when they cover BOTH halves of the
+    // identity: DEV_ACCOUNT replaces the shielded keys, and DEV_XRPL_ACCOUNT
+    // replaces the XRPL account the Shield tab reads. DEV_ACCOUNT alone used to
+    // boot straight past sign-in, which left the browser with no session — and
+    // `xumm.user.account` then never settles at all, so the public balance hung
+    // on "loading" forever.
+    if (isXappRuntime() || (DEV_ACCOUNT && DEV_XRPL_ACCOUNT)) {
       boot();
     } else {
       setStatus("Connecting to Xaman…");

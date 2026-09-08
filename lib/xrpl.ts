@@ -1,5 +1,6 @@
 import { getXumm } from "./xumm-client";
 import { AXELAR_GATEWAY } from "./axelar";
+import { DEV_XRPL_ACCOUNT } from "./dev-account";
 import { compareForPicker } from "./tokens";
 import type { XrplToken, XrplTokens } from "./types";
 
@@ -81,12 +82,7 @@ const xrplBatch = (
  * issued currencies with a positive trustline balance.
  */
 export async function fetchXrplTokens(): Promise<XrplTokens> {
-  const xumm = getXumm();
-  const [account, endpoint] = await Promise.all([
-    xumm.user.account,
-    xumm.user.networkEndpoint,
-  ]);
-  if (!account) throw new Error("No XRPL account connected");
+  const { account, endpoint } = await connectedAccount();
 
   const wsUrl = toWebSocketUrl(endpoint);
   const res = await xrplBatch(wsUrl, [
@@ -137,6 +133,51 @@ export async function fetchXrplTokens(): Promise<XrplTokens> {
   );
 
   return { account, tokens };
+}
+
+/**
+ * The XRPL account to read, and the node to read it from. Normally both come
+ * from the Xaman session; the dev override supplies an r-address instead, so
+ * the desktop dev flow needs no session at all (it then reads the public
+ * mainnet cluster, since only Xaman knows which node it would have used).
+ */
+async function connectedAccount(): Promise<{
+  account: string;
+  endpoint?: string | null;
+}> {
+  if (DEV_XRPL_ACCOUNT) return { account: DEV_XRPL_ACCOUNT };
+
+  const xumm = getXumm();
+
+  // Guard against the SDK's signed-out deadlock. Every `xumm.user.*` field is a
+  // promise gated on the SDK's internal readyPromises, and one of those only
+  // settles once the PKCE flow emits `retrieved`/`success`. With no Xaman
+  // session the SDK emits `loggedout` instead, so `xumm.user.account` never
+  // settles AT ALL — it does not reject, it just hangs, and with it every
+  // caller and the asset picker that awaits them.
+  //
+  // `ready` does fire on both branches in browser mode (it is resolved by the
+  // `loggedout` path too) and `state.signedIn` is set before it, so waiting for
+  // `ready` and then reading `state` turns that hang into a plain error. Inside
+  // the xApp the OTT handshake always supplies the session, `state.signedIn`
+  // there hinges on an optional OTT field, and a failed handshake rejects
+  // `user.account` rather than stalling it — so leave that path untouched.
+  if (!xumm.runtime.xapp) {
+    await xumm.environment.ready;
+    if (!xumm.state.signedIn) {
+      throw new Error(
+        "Not signed in with Xaman — sign in to read your XRPL balance.",
+      );
+    }
+  }
+
+  const [account, endpoint] = await Promise.all([
+    xumm.user.account,
+    xumm.user.networkEndpoint,
+  ]);
+  if (!account) throw new Error("No XRPL account connected");
+
+  return { account, endpoint };
 }
 
 /**
