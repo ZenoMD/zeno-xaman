@@ -19,6 +19,7 @@ import { Mnemonic, sha256, parseUnits } from "ethers";
 import type {
   FeeQuoteParams,
   LogFn,
+  ScanState,
   ShieldParams,
   ShieldedTokenBalance,
   TransferParams,
@@ -57,8 +58,8 @@ export type StartWalletCallbacks = {
   onAddress: (addr: string) => void;
   /** all shielded token balances (XRP is just another entry) */
   onShieldedTokens: (tokens: ShieldedTokenBalance[]) => void;
-  /** shielded UTXO merkletree scan phase, once scanning actually begins */
-  onScanState: (state: "scanning" | "complete") => void;
+  /** shielded UTXO merkletree scan phase + progress, once scanning begins */
+  onScanState: (state: ScanState) => void;
 };
 
 /**
@@ -106,10 +107,11 @@ export async function startWallet({
     );
   };
 
-  // Only reveal the balance once it's actually been computed (the balance-update
-  // callback, which fires *after* the merkletree scan completes). Reporting scan-
-  // complete earlier would briefly show a stale 0.00. Until then we stay in the
-  // "scanning" state so the UI keeps a dashed balance.
+  // Only reveal the balance once it's actually been computed. The balance-update
+  // callback — not the scan's own Complete event — is that moment: the engine
+  // pushes decrypted balances first and only then emits Complete, and reporting
+  // done any earlier would briefly show a stale 0.00. Until it lands we stay in
+  // the "scanning" state so the UI keeps a dashed balance.
   let balancesReady = false;
 
   const { wallet, networkName } = await initRailgun(
@@ -119,13 +121,17 @@ export async function startWallet({
       mnemonic,
       encryptionKey,
       networkName: NETWORK,
-      onScanUpdate: () => {
-        if (!balancesReady) onScanState("scanning");
+      onScanUpdate: ({ progress }) => {
+        if (!balancesReady) onScanState({ phase: "scanning", progress });
       },
       onBalanceUpdate: () => {
-        balancesReady = true;
         render();
-        onScanState("complete");
+        // Announced once, not on every balance refresh: the sync strip shows a
+        // confirmation and then retracts, and it must not splash back up each
+        // time a later refresh lands.
+        if (balancesReady) return;
+        balancesReady = true;
+        onScanState({ phase: "complete" });
       },
     },
     log,

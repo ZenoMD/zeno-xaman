@@ -131,7 +131,8 @@ body {
 
 /* body stretches this column to the full viewport height, so in a short window
    its children would shrink to fit - squashing the header card until its balance
-   is clipped. They keep their intrinsic height and the page scrolls instead. */
+   is clipped, and the sync strip until it collides with the tab bar. They keep
+   their intrinsic height and the page scrolls instead. */
 .wallet > * {
   flex-shrink: 0;
 }
@@ -355,6 +356,91 @@ body {
 
 .flow-card--left .flow-card__arrow {
   transform: rotate(180deg);
+}
+
+/* The sync strip: a band under the header card reporting how far the shielded
+   merkletree scan has got, because the balance above it is only as current as
+   that scan. It confirms and then retracts — a permanent bar would be furniture,
+   and the wallet spends most of its life synced. */
+.sync-strip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg);
+  background: var(--surface-elevated);
+  border: 1px solid var(--hairline-dark);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  max-height: 120px;
+  animation: sync-strip-in 0.26s ease-out;
+}
+
+@keyframes sync-strip-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+/* Retracting: it fades, collapses, and eats the column gap it leaves behind, so
+   the card above settles rather than the page snapping upward. */
+.sync-strip--leaving {
+  opacity: 0;
+  max-height: 0;
+  padding-block: 0;
+  border-color: transparent;
+  margin-bottom: calc(-1 * var(--space-xl));
+  transition:
+    opacity 0.26s ease,
+    max-height 0.26s ease,
+    padding 0.26s ease,
+    margin 0.26s ease;
+}
+
+.sync-strip__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.sync-strip__label {
+  font: var(--type-body-sm-bold);
+  color: var(--on-dark);
+}
+
+.sync-strip__value {
+  font: var(--type-body-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--stone);
+}
+
+/* No third fill inside the strip: the track is the hairline value at bar
+   weight, so a part-filled bar reads as a rule being drawn in. */
+.sync-strip__track {
+  height: 3px;
+  border-radius: var(--radius-full);
+  background: var(--hairline-dark);
+  overflow: hidden;
+}
+
+/* White, not brand blue: MAX on the Shield tab is already the viewport's one
+   Ethereum-blue element and it sits just below this. */
+.sync-strip__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--on-dark-mute);
+  transition: width 0.3s ease;
+}
+
+/* Landed. Teal is the system's success colour and clears AA on the card surface
+   (5.85:1), the same role it plays in .panel__result. */
+.sync-strip--done .sync-strip__label {
+  color: var(--accent-teal);
+}
+
+.sync-strip--done .sync-strip__fill {
+  background: var(--accent-teal);
 }
 
 /* button-primary: the white pill on dark is the brand's loudest action and the
@@ -806,6 +892,12 @@ body {
   min-height: 1em;
 }
 
+/* Nested under the boot hint, the status names the current step. Quieter than
+   the hint it sits below, and only ever shown while the wallet is starting. */
+.panel__hint .status {
+  margin-top: var(--space-xs);
+}
+
 .log {
   margin-top: auto;
   font: var(--type-caption);
@@ -830,7 +922,9 @@ body {
 }
 
 /* Land every animated element on its end-state for users who ask for less
-   motion. The scan spinner is the only continuous animation here. */
+   motion. The scan spinner is the only continuous animation here; the sync
+   strip's splash, bar and retraction all collapse to instant swaps, and its
+   timings are JS-driven so it still holds its confirmation before going. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

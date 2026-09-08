@@ -13,8 +13,8 @@ import {
   NETWORK_CONFIG,
   ChainType,
   EVMGasType,
+  MerkletreeScanStatus,
   TXIDVersion,
-  type MerkletreeScanUpdateEvent,
 } from "@railgun-community/shared-models";
 import { POI } from "@railgun-community/engine";
 import * as snarkjs from "snarkjs";
@@ -24,6 +24,22 @@ import { compareForPicker } from "./tokens";
 import type { LogFn } from "./types";
 
 type RailgunWallet = Awaited<ReturnType<typeof createRailgunWallet>>;
+
+/**
+ * One shielded-UTXO scan report, with a fraction that can be trusted.
+ *
+ * The engine only attaches `progress` to its `Updated` events; the terminal
+ * `Complete`/`Incomplete` events carry none, and `@railgun-community/wallet`
+ * coerces the missing field to zero before it ever reaches us (see
+ * `services/railgun/core/init.js`: `progress: progress ?? 0.0`). Reporting that
+ * raw is how the log came to end on "scan [Complete] 0%" for a scan that had
+ * just finished. The fraction is tracked here instead, so no caller has to know.
+ */
+export type ScanUpdate = {
+  status: MerkletreeScanStatus;
+  /** 0..1, never decreasing within a scan, and exactly 1 once it completes. */
+  progress: number;
+};
 
 const POI_NODE_URLS = ["https://poi.railgun.org"];
 const TXID = TXIDVersion.V2_PoseidonMerkle;
@@ -261,7 +277,7 @@ export async function initRailgun(
     encryptionKey: string;
     networkName?: NetworkName;
     /** Fired as the shielded UTXO merkletree scan progresses/completes. */
-    onScanUpdate?: (event: MerkletreeScanUpdateEvent) => void;
+    onScanUpdate?: (update: ScanUpdate) => void;
     /**
      * Fired once the wallet's shielded balances have actually been computed
      * (fires after the merkletree scan, even for an empty wallet). This — not
@@ -290,21 +306,58 @@ export async function initRailgun(
   setOnBalanceUpdateCallback((e) => {
     for (const { tokenAddress, amount } of e.erc20Amounts) {
       balances.set(`${e.balanceBucket}:${tokenAddress.toLowerCase()}`, amount);
+      // Console only. The balance card shows this properly: by symbol, scaled by
+      // the token's own decimals. Raw base units against a truncated address are
+      // for debugging a bucket that looks wrong, not for the status line.
       if (amount > 0n)
-        log(
-          `balance [${e.balanceBucket}] ${tokenAddress.slice(0, 10)}…: ${amount}`,
+        // eslint-disable-next-line no-console
+        console.log(
+          `[railgun] balance [${e.balanceBucket}] ${tokenAddress.slice(0, 10)}…: ${amount}`,
         );
     }
     // Balances are now computed (even if empty) — safe to reveal.
     onBalanceUpdate?.();
   });
 
-  // Forward shielded-UTXO scan progress so the UI can hold off on showing a
-  // (misleading) zero balance until the merkletree is fully synced.
+  // Forward shielded-UTXO scan progress so the UI can report the sync and hold
+  // off on showing a (misleading) zero balance until the merkletree is synced.
   if (onScanUpdate) {
-    setOnUTXOMerkletreeScanCallback((event) => {
-      log(`scan [${event.scanStatus}] ${Math.round(event.progress * 100)}%`);
-      onScanUpdate(event);
+    // Highest fraction the scan in flight has reported. The engine's own numbers
+    // already climb, but clamping here is what guarantees no consumer can render
+    // progress that goes backwards or overshoots 100%.
+    let progress = 0;
+    let finished = false;
+
+    setOnUTXOMerkletreeScanCallback(({ scanStatus: status, progress: raw }) => {
+      const terminal =
+        status === MerkletreeScanStatus.Complete ||
+        status === MerkletreeScanStatus.Incomplete;
+
+      // A non-terminal event after a terminal one is a new scan — the engine
+      // rescans as fresh blocks land — so the ceiling starts over with it.
+      if (!terminal && finished) progress = 0;
+      finished = terminal;
+
+      if (status === MerkletreeScanStatus.Complete) progress = 1;
+      else if (status === MerkletreeScanStatus.Updated)
+        // `|| 0` also absorbs the NaN a slow sync yields when there is no block
+        // span left to scan and the engine divides by zero.
+        progress = Math.min(1, Math.max(progress, raw || 0));
+
+      const pct = Math.round(progress * 100);
+      if (status === MerkletreeScanStatus.Incomplete) {
+        // A scan that stopped short is a real condition the sync strip does not
+        // distinguish, so it still reaches the activity log. It reports where it
+        // got to rather than claiming that figure as the synced state.
+        log(`scan stopped at ${pct}% before completing`);
+      } else {
+        // Routine progress stays on the console: the sync strip reports it now,
+        // and the status line is for things the user asked for. It used to end
+        // every boot on "scan [Complete] 100%".
+        // eslint-disable-next-line no-console
+        console.log(`[railgun] scan [${status}] ${pct}%`);
+      }
+      onScanUpdate({ status, progress });
     });
   }
 

@@ -6,6 +6,23 @@ export type LogFn = (msg: string) => void;
 export type TabId = "shield" | "transfer" | "unshield";
 
 /**
+ * Where the shielded-balance sync has got to.
+ *
+ * A union rather than a phase plus a loose `scanProgress` number: the fraction
+ * only means anything while the scan is running, and carrying it inside the
+ * `scanning` arm makes "42% and complete" unrepresentable instead of merely
+ * unlikely. It also keeps the whole sync state as one value to pass around.
+ *
+ * - `idle`: wallet not booted yet (loading modules / awaiting sign-in)
+ * - `scanning`: merkletree sync in progress; `progress` is 0..1 and never falls
+ * - `complete`: balances have been computed, so what is shown is trustworthy
+ */
+export type ScanState =
+  | { phase: "idle" }
+  | { phase: "scanning"; progress: number }
+  | { phase: "complete" };
+
+/**
  * What the active form tells the header card: the asset in play, and where the
  * funds are headed when that is not the wallet's own account.
  */

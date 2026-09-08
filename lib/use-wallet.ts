@@ -3,15 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DEV_ACCOUNT, DEV_XRPL_ACCOUNT } from "./dev-account";
 import { isXappRuntime } from "./runtime";
-import type { ShieldedTokenBalance, WalletApi } from "./types";
-
-/**
- * Scan phase for the shielded balance:
- * - `idle`: wallet not booted yet (loading modules / awaiting sign-in)
- * - `scanning`: merkletree sync in progress
- * - `complete`: fully synced, balance is trustworthy
- */
-export type ScanState = "idle" | "scanning" | "complete";
+import type { ScanState, ShieldedTokenBalance, WalletApi } from "./types";
 
 export type UseWalletState = {
   /** latest one-line progress/status message */
@@ -22,7 +14,7 @@ export type UseWalletState = {
   address: string | null;
   /** all shielded token balances (XRP is just another entry), highest first */
   shieldedTokens: ShieldedTokenBalance[];
-  /** shielded balance scan phase (drives the dashed balance / "Scanning…") */
+  /** shielded balance sync phase + progress (drives the sync strip) */
   scanState: ScanState;
   /** fatal boot error, if any */
   error: Error | null;
@@ -52,7 +44,7 @@ export function useWallet(): UseWalletState {
   const [shieldedTokens, setShieldedTokens] = useState<ShieldedTokenBalance[]>(
     [],
   );
-  const [scanState, setScanState] = useState<ScanState>("idle");
+  const [scanState, setScanState] = useState<ScanState>({ phase: "idle" });
   const [address, setAddress] = useState<string | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [api, setApi] = useState<WalletApi | null>(null);

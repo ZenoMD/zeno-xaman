@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { useWallet } from "../lib/use-wallet";
 import { useAssetList } from "../lib/use-asset-list";
 import { FlowCard } from "../components/flow-card";
+import { SyncStrip } from "../components/sync-strip";
 import { WalletTabs } from "../components/wallet-tabs";
 import type { FlowSelection, TabId } from "../lib/types";
 
@@ -70,8 +71,10 @@ export default function Page() {
         receive={flow.receive}
         publicAssets={publicAssets}
         shieldedTokens={shieldedTokens}
-        scanning={scanState !== "complete"}
+        scanning={scanState.phase !== "complete"}
       />
+
+      <SyncStrip scan={scanState} />
 
       {api ? (
         <WalletTabs
@@ -86,10 +89,12 @@ export default function Page() {
           {error
             ? `Wallet failed to start: ${error.message}`
             : "Setting up your shielded wallet…"}
+          {/* Boot only: names the step the hint above is generic about. Once the
+              wallet is up there is no step left to report, and the line would
+              just hold the last thing that happened to log. */}
+          <p className="status">{status}</p>
         </section>
       )}
-
-      <p className="status">{status}</p>
 
       <details className="log">
         <summary>Logs</summary>
