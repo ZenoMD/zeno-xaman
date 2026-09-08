@@ -156,8 +156,9 @@ body {
   border-radius: var(--radius-full);
 }
 
-/* feature-card-dark. --surface-elevated is only 1.18:1 against the canvas, so
-   the hairline carries the edge, not the fill. The system has no card shadow. */
+/* feature-card-dark, used for the signed-out card. --surface-elevated is only
+   1.18:1 against the canvas, so the hairline carries the edge, not the fill.
+   The system has no card shadow. */
 .balance-card {
   background: var(--surface-elevated);
   border: 1px solid var(--hairline-dark);
@@ -182,8 +183,133 @@ body {
   color: var(--on-dark-mute);
 }
 
-.balance-card__scanning {
-  margin: var(--space-xxs) 0 0;
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* The header card: the selected asset on both sides of the move the active tab
+   makes. Public keeps the left pane and shielded the right across Shield and
+   Unshield; what changes is the arrow, which half sits behind the fold, and
+   which number carries the emphasis. */
+.flow-card {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-elevated);
+  border: 1px solid var(--hairline-dark);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xl);
+}
+
+/* The destination half, folded over the source on a slight diagonal. The
+   element IS the fold: its leading border draws the crease and its pinstripes
+   fill the flap, so the two can never drift out of line. It pivots on the card
+   centre, which is where the arrow chip sits. */
+.flow-card__fold {
+  position: absolute;
+  top: -60%;
+  bottom: -60%;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.05) 0 1px,
+    transparent 1px 7px
+  );
+}
+
+.flow-card--right .flow-card__fold {
+  left: 50%;
+  right: -30%;
+  border-left: 1px solid var(--hairline-dark);
+  transform-origin: 0 50%;
+  transform: rotate(-7deg);
+}
+
+/* Unshield folds the other way: same geometry mirrored, so the two directions
+   read as one gesture reversed rather than two different cards. */
+.flow-card--left .flow-card__fold {
+  right: 50%;
+  left: -30%;
+  border-right: 1px solid var(--hairline-dark);
+  transform-origin: 100% 50%;
+  transform: rotate(7deg);
+}
+
+.flow-card__panes {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 36px 1fr;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* Receiving moves nothing, so the card drops the fold and holds one balance. */
+.flow-card--single .flow-card__panes {
+  grid-template-columns: 1fr;
+}
+
+.flow-card__pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xxs);
+  min-width: 0;
+}
+
+.flow-card__pane--right {
+  text-align: right;
+  align-items: flex-end;
+}
+
+.flow-card__label {
+  margin: 0;
+  font: var(--type-caption);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--stone);
+}
+
+/* The wallet's display moment: General Sans, tight tracking, tabular figures.
+   Two panes share the width, so this sits a step below a single balance. */
+.flow-card__amount {
+  margin: 0;
+  font: var(--type-heading-sm);
+  letter-spacing: var(--tracking-heading-lg);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* The destination is the quieter half of the pair: it is not what you spend.
+   Reversing this is how Unshield reverses the emphasis. */
+.flow-card__pane--destination .flow-card__amount {
+  color: var(--on-dark-mute);
+}
+
+.flow-card__symbol {
+  margin-left: var(--space-xs);
+  font: var(--type-body-sm);
+  letter-spacing: var(--tracking-ui);
+  color: var(--stone);
+}
+
+.flow-card__dest {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--on-dark-mute);
+  overflow-wrap: anywhere;
+}
+
+.flow-card__note {
+  margin: 0;
+  font: var(--type-body-sm);
+  color: var(--stone);
+}
+
+.flow-card__pending {
+  margin: 0;
   font: var(--type-body-sm-bold);
   color: var(--on-dark-mute);
   display: inline-flex;
@@ -191,8 +317,9 @@ body {
   gap: var(--space-xs);
 }
 
-.balance-card__scanning::before {
+.flow-card__pending::before {
   content: "";
+  flex: none;
   width: 10px;
   height: 10px;
   border-radius: 50%;
@@ -201,76 +328,26 @@ body {
   animation: spin 0.8s linear infinite;
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+.flow-card__crease {
+  display: grid;
+  place-items: center;
 }
 
-.balance-card__tokens {
-  list-style: none;
-  margin: var(--space-sm) 0 2px;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-md);
+/* The chip punches back down to the canvas rather than adding a third fill, and
+   masks the crease where the two halves meet. */
+.flow-card__arrow {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--hairline-dark);
+  background: var(--canvas-dark);
+  color: var(--on-dark);
 }
 
-.balance-card__token {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-md);
-}
-
-.balance-card__token-symbol {
-  font: var(--type-body-sm-bold);
-  letter-spacing: var(--tracking-ui);
-  color: var(--stone);
-}
-
-/* The wallet's display moment: General Sans, tight tracking, tabular figures. */
-.balance-card__token-amount {
-  font: var(--type-heading-md);
-  letter-spacing: var(--tracking-heading-lg);
-  font-variant-numeric: tabular-nums;
-}
-
-.balance-card__address {
-  margin: var(--space-md) 0 0;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  line-height: 1.4;
-  color: var(--stone);
-  word-break: break-all;
-}
-
-button.balance-card__address {
-  appearance: none;
-  border: none;
-  background: transparent;
-  padding: 0;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-sm);
-  text-align: left;
-}
-
-.balance-card__copy {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--stone);
-}
-
-button.balance-card__address:hover .balance-card__copy {
-  color: var(--brand-primary);
-}
-
-button.balance-card__address:active {
-  opacity: 0.7;
+.flow-card--left .flow-card__arrow {
+  transform: rotate(180deg);
 }
 
 /* button-primary: the white pill on dark is the brand's loudest action and the
@@ -548,12 +625,42 @@ button.balance-card__address:active {
   margin: 0;
 }
 
-.asset-card__meta {
+/* One-tap amounts. The balance line that used to sit here is gone: the header
+   card already shows the side being spent from, so printing it twice was noise. */
+.asset-card__quick {
   display: flex;
-  flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-md);
+  gap: var(--space-sm);
+}
+
+.asset-card__preset {
+  appearance: none;
+  border: 1px solid var(--hairline-dark);
+  background: transparent;
+  color: var(--on-dark);
+  font: var(--type-body-sm-bold);
+  letter-spacing: var(--tracking-ui);
+  padding: var(--space-sm) var(--space-lg);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+}
+
+/* MAX is already the viewport's one brand-blue element, so the selected preset
+   marks itself with a white hairline instead of a second blue. */
+.asset-card__preset--active {
+  border-color: var(--on-dark);
+}
+
+.asset-card__preset:disabled {
+  color: var(--stone);
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* MAX takes the right-hand end of the row, away from the fixed amounts. */
+.asset-card__quick .asset-card__max {
+  margin-left: auto;
 }
 
 /* The one filled brand surface in the wallet: -deep under a white label is the
@@ -570,9 +677,119 @@ button.balance-card__address:active {
   cursor: pointer;
 }
 
-.asset-card__balance {
+/* Fee breakdown under the amount: every cost between what you type and what the
+   far end receives. Ledger-plain — labels left, amounts right, no card of its
+   own, so it reads as a footnote to the amount above it. */
+.fees {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.fees__line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.fees__line--sum {
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--hairline-dark);
+}
+
+.fees__label {
   font: var(--type-body-sm);
   color: var(--stone);
+}
+
+.fees__amount {
+  font: var(--type-body-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--on-dark-mute);
+  text-align: right;
+}
+
+/* The number the user actually came for. */
+.fees__line--total .fees__label,
+.fees__line--total .fees__amount {
+  font: var(--type-body-sm-bold);
+  color: var(--on-dark);
+}
+
+.fees__pending {
+  margin: 0;
+  font: var(--type-body-sm);
+  color: var(--stone);
+}
+
+/* A quote missing a component is not a quote: say so rather than let the totals
+   read as final. */
+.fees__warning {
+  margin: 0;
+  font: var(--type-caption);
+  color: var(--accent-danger-bright);
+}
+
+/* Send/Receive switch inside the Transfer tab. Quieter than the top-level tab
+   bar — it sits inside a panel, so it takes a hairline instead of the white pill. */
+.segment {
+  display: flex;
+  gap: var(--space-xxs);
+  padding: var(--space-xxs);
+  border: 1px solid var(--hairline-dark);
+  border-radius: var(--radius-full);
+  align-self: flex-start;
+}
+
+.segment__option {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--on-dark-mute);
+  font: var(--type-body-sm-bold);
+  padding: var(--space-sm) var(--space-lg);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+}
+
+.segment__option--active,
+.segment__option--active:hover {
+  background: var(--surface-elevated);
+  color: var(--on-dark);
+}
+
+.receive {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  background: var(--surface-elevated);
+  border: 1px solid var(--hairline-dark);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xl);
+}
+
+.receive__label {
+  margin: 0;
+  font: var(--type-caption);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--stone);
+}
+
+/* Shown in full, never truncated: a 0zk address is only useful complete. */
+.receive__address {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--on-dark);
+  word-break: break-all;
+}
+
+.receive__copy {
+  align-self: flex-start;
 }
 
 .status {

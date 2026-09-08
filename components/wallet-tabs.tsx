@@ -1,15 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { copyText } from "../lib/clipboard";
+import { useAssetList, type AssetListState } from "../lib/use-asset-list";
 import type {
+  FeeQuote,
+  FlowSelection,
   ShieldParams,
+  TabId,
   WalletApi,
   XrplToken,
-  XrplTokens,
 } from "../lib/types";
 import ChevronIcon from "./icons/chevron-down.svg";
 
-type TabId = "shield" | "transfer" | "unshield";
+// One-tap amounts, alongside MAX. The balance itself is no longer printed here:
+// the header card already shows the side being spent from.
+const AMOUNT_PRESETS = ["0.1", "1", "10"];
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "shield", label: "Shield" },
@@ -25,9 +31,24 @@ type Result =
 const axelarscanGmpUrl = (txid: string): string =>
   `https://axelarscan.io/gmp/${txid}`;
 
-export function WalletTabs({ api }: { api: WalletApi }) {
-  const [tab, setTab] = useState<TabId>("shield");
+export type WalletTabsProps = {
+  api: WalletApi;
+  /** Controlled by the page, which shows the same direction in the header card. */
+  tab: TabId;
+  onTabChange: (tab: TabId) => void;
+  /** The public (XRPL) asset list, loaded once by the page and shared with the card. */
+  publicAssets: AssetListState;
+  /** Reports the active form's asset + destination up to the header card. */
+  onFlow: (flow: FlowSelection) => void;
+};
 
+export function WalletTabs({
+  api,
+  tab,
+  onTabChange,
+  publicAssets,
+  onFlow,
+}: WalletTabsProps) {
   return (
     <div className="tabs">
       <div className="tabs__bar" role="tablist">
@@ -37,7 +58,7 @@ export function WalletTabs({ api }: { api: WalletApi }) {
             role="tab"
             aria-selected={tab === t.id}
             className={`tabs__tab${tab === t.id ? " tabs__tab--active" : ""}`}
-            onClick={() => setTab(t.id)}
+            onClick={() => onTabChange(t.id)}
           >
             {t.label}
           </button>
@@ -45,59 +66,28 @@ export function WalletTabs({ api }: { api: WalletApi }) {
       </div>
 
       <div className="tabs__panel" role="tabpanel">
-        {tab === "shield" && <ShieldPanel api={api} />}
-        {tab === "transfer" && <TransferPanel api={api} />}
-        {tab === "unshield" && <UnshieldPanel api={api} />}
+        {tab === "shield" && (
+          <ShieldPanel api={api} publicAssets={publicAssets} onFlow={onFlow} />
+        )}
+        {tab === "transfer" && <TransferPanel api={api} onFlow={onFlow} />}
+        {tab === "unshield" && <UnshieldPanel api={api} onFlow={onFlow} />}
       </div>
     </div>
   );
 }
 
-type AssetListState = {
-  loading: boolean;
-  tokens: XrplToken[];
-  error: string | null;
-};
-
-// Load an asset list from the controller, tracking loading/error state. `deps`
-// re-runs the loader (the panels pass [api], which is stable post-boot).
-function useAssetList(
-  loader: () => Promise<XrplTokens | XrplToken[]>,
-  deps: React.DependencyList,
-): AssetListState {
-  const [state, setState] = useState<AssetListState>({
-    loading: true,
-    tokens: [],
-    error: null,
-  });
-  useEffect(() => {
-    let active = true;
-    setState({ loading: true, tokens: [], error: null });
-    Promise.resolve()
-      .then(loader)
-      .then((res) => {
-        const tokens = Array.isArray(res) ? res : res.tokens;
-        if (active) setState({ loading: false, tokens, error: null });
-      })
-      .catch((err: unknown) => {
-        if (active)
-          setState({
-            loading: false,
-            tokens: [],
-            error: (err as Error).message || String(err),
-          });
-      });
-    return () => {
-      active = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
-  return state;
-}
-
-function ShieldPanel({ api }: { api: WalletApi }) {
-  const { loading, tokens, error } = useAssetList(
-    () => api.getXrplTokens(),
+function ShieldPanel({
+  api,
+  publicAssets: { loading, tokens, error },
+  onFlow,
+}: {
+  api: WalletApi;
+  publicAssets: AssetListState;
+  onFlow: (flow: FlowSelection) => void;
+}) {
+  const onQuote = useCallback(
+    (tokenId: string, amount: string) =>
+      api.quoteFees({ flow: "shield", tokenId, amount }),
     [api],
   );
   return (
@@ -109,39 +99,116 @@ function ShieldPanel({ api }: { api: WalletApi }) {
       action="Shield"
       busyLabel="Shielding…"
       recipientMode="optional"
+      onFlow={onFlow}
+      onQuote={onQuote}
+      receivesLabel="Arrives shielded"
       onExplorer={(txid) => api.openBrowser(axelarscanGmpUrl(txid))}
       onSubmit={api.shield}
     />
   );
 }
 
-// Private transfer: send a shielded balance to another 0zk address. Funds stay
-// in the pool (the broadcaster pays EVM gas). Pick which shielded token to send,
-// the amount, then the recipient's 0zk address — same card as Shield.
-function TransferPanel({ api }: { api: WalletApi }) {
+// Private transfer: send a shielded balance to another 0zk address, or show your
+// own address to be paid at. Funds stay in the pool either way (the broadcaster
+// pays EVM gas), so both directions live behind one Send/Receive switch.
+function TransferPanel({
+  api,
+  onFlow,
+}: {
+  api: WalletApi;
+  onFlow: (flow: FlowSelection) => void;
+}) {
+  const [mode, setMode] = useState<"send" | "receive">("send");
   const { loading, tokens, error } = useAssetList(
     () => api.getShieldedTokens(),
     [api],
   );
+  const onQuote = useCallback(
+    (tokenAddress: string, amount: string) =>
+      api.quoteFees({ flow: "transfer", tokenAddress, amount }),
+    [api],
+  );
+
   return (
-    <AssetForm
-      loading={loading}
-      error={error}
-      tokens={tokens}
-      emptyHint="No shielded balance yet. Shield some funds first."
-      action="Transfer"
-      busyLabel="Proving & sending…"
-      recipientMode="required"
-      recipientHint="Recipient's 0zk address · stays private in the pool"
-      onSubmit={async ({ tokenId, amount, recipientAddress }) => {
-        const res = await api.transfer({
-          tokenAddress: tokenId,
-          amount,
-          recipientAddress: recipientAddress!,
-        });
-        return { txid: res.txHash };
-      }}
-    />
+    <div className="panel">
+      <div className="segment" role="tablist">
+        {(["send", "receive"] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            role="tab"
+            aria-selected={mode === m}
+            className={`segment__option${mode === m ? " segment__option--active" : ""}`}
+            onClick={() => setMode(m)}
+          >
+            {m === "send" ? "Send" : "Receive"}
+          </button>
+        ))}
+      </div>
+
+      {mode === "send" ? (
+        <AssetForm
+          loading={loading}
+          error={error}
+          tokens={tokens}
+          emptyHint="No shielded balance yet. Shield some funds first."
+          action="Transfer"
+          busyLabel="Proving & sending…"
+          recipientMode="required"
+          recipientHint="Recipient's 0zk address · stays private in the pool"
+          onFlow={onFlow}
+          onQuote={onQuote}
+          receivesLabel="Recipient receives"
+          onSubmit={async ({ tokenId, amount, recipientAddress }) => {
+            const res = await api.transfer({
+              tokenAddress: tokenId,
+              amount,
+              recipientAddress: recipientAddress!,
+            });
+            return { txid: res.txHash };
+          }}
+        />
+      ) : (
+        <ReceivePanel address={api.railgunAddress} onFlow={onFlow} />
+      )}
+    </div>
+  );
+}
+
+// Receive: the wallet's own 0zk address, in full, to hand to a sender. Shielded
+// funds can only be addressed to it, so it is safe to share.
+function ReceivePanel({
+  address,
+  onFlow,
+}: {
+  address: string;
+  onFlow: (flow: FlowSelection) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  // Nothing is moving while receiving, so the header card drops to one balance.
+  useEffect(() => {
+    onFlow({ receive: true });
+  }, [onFlow]);
+
+  const onCopy = async () => {
+    if (!(await copyText(address))) return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <div className="receive">
+      <p className="receive__label">Your shielded address</p>
+      <p className="receive__address">{address}</p>
+      <button type="button" className="btn receive__copy" onClick={onCopy}>
+        {copied ? "Copied" : "Copy address"}
+      </button>
+      <p className="field__hint">
+        Anyone can shield or transfer to this address. What arrives stays
+        private in the pool.
+      </p>
+    </div>
   );
 }
 
@@ -149,9 +216,20 @@ function TransferPanel({ api }: { api: WalletApi }) {
 // and amount; it unshields via RelayAdapt and bridges back to XRPL via Axelar.
 // Defaults to the connected account, with an option to send to another XRPL
 // address.
-function UnshieldPanel({ api }: { api: WalletApi }) {
+function UnshieldPanel({
+  api,
+  onFlow,
+}: {
+  api: WalletApi;
+  onFlow: (flow: FlowSelection) => void;
+}) {
   const { loading, tokens, error } = useAssetList(
     () => api.getShieldedTokens(),
+    [api],
+  );
+  const onQuote = useCallback(
+    (tokenAddress: string, amount: string) =>
+      api.quoteFees({ flow: "unshield", tokenAddress, amount }),
     [api],
   );
   return (
@@ -166,6 +244,9 @@ function UnshieldPanel({ api }: { api: WalletApi }) {
       recipientKind="xrpl"
       recipientLabel="Unshield to another XRPL account"
       recipientHint="Recipient's XRPL address. Leave off to send to your own account."
+      onFlow={onFlow}
+      onQuote={onQuote}
+      receivesLabel="Arrives on XRPL"
       onExplorer={(txid) => api.openBrowser(axelarscanGmpUrl(txid))}
       onSubmit={async ({ tokenId, amount, recipientAddress }) => {
         const res = await api.unshield({
@@ -176,6 +257,51 @@ function UnshieldPanel({ api }: { api: WalletApi }) {
         return { txid: res.txHash };
       }}
     />
+  );
+}
+
+// What the amount actually costs, ending in what the far end receives. A line's
+// own `symbol` is printed because it need not match the quote's: the unshield's
+// return relay is paid in native XRP whatever token is moving.
+function FeeBreakdown({
+  quote,
+  receivesLabel,
+}: {
+  quote: FeeQuote | null;
+  receivesLabel: string;
+}) {
+  if (!quote) return <p className="fees__pending">Calculating fees…</p>;
+
+  return (
+    <div className="fees">
+      {quote.lines.map((line) => (
+        <div key={line.label} className="fees__line">
+          <span className="fees__label">{line.label}</span>
+          <span className="fees__amount">
+            {line.kind === "added" ? "+" : "−"}
+            {line.amount} {line.symbol}
+          </span>
+        </div>
+      ))}
+
+      {quote.sends !== quote.amount && (
+        <div className="fees__line fees__line--sum">
+          <span className="fees__label">Leaves your wallet</span>
+          <span className="fees__amount">
+            {quote.sends} {quote.symbol}
+          </span>
+        </div>
+      )}
+
+      <div className="fees__line fees__line--sum fees__line--total">
+        <span className="fees__label">{receivesLabel}</span>
+        <span className="fees__amount">
+          {quote.receives} {quote.symbol}
+        </span>
+      </div>
+
+      {quote.incomplete && <p className="fees__warning">{quote.incomplete}</p>}
+    </div>
   );
 }
 
@@ -197,6 +323,15 @@ type AssetFormProps = {
   /** Text for the optional-recipient checkbox / required-recipient field label. */
   recipientLabel?: string;
   recipientHint?: string;
+  /** Reports the selected asset + any explicit destination to the header card. */
+  onFlow: (flow: FlowSelection) => void;
+  /**
+   * Prices the entered amount. Must be referentially stable (useCallback on the
+   * panel), since it keys the debounced quote effect.
+   */
+  onQuote: (tokenId: string, amount: string) => Promise<FeeQuote>;
+  /** Names the far end of this flow in the fee breakdown, e.g. "Arrives shielded". */
+  receivesLabel: string;
   /** Opens an explorer for a successful txid (via the xApp browser); shown as a link. */
   onExplorer?: (txid: string) => void;
   onSubmit: (params: ShieldParams) => Promise<{ txid: string }>;
@@ -216,6 +351,9 @@ function AssetForm({
   recipientKind = "0zk",
   recipientLabel,
   recipientHint,
+  onFlow,
+  onQuote,
+  receivesLabel,
   onExplorer,
   onSubmit,
 }: AssetFormProps) {
@@ -225,6 +363,8 @@ function AssetForm({
   const [recipient, setRecipient] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result>(null);
+  const [quote, setQuote] = useState<FeeQuote | null>(null);
+  const [quoteFailed, setQuoteFailed] = useState(false);
 
   // Default-select the first selectable token once the list loads. Skip tokens
   // the Axelar bridge can't accept (supported === false) so the form never
@@ -235,17 +375,7 @@ function AssetForm({
       setTokenId(selectable[0].id);
   }, [tokens, tokenId]);
 
-  if (error) return <p className="panel__hint panel__hint--error">{error}</p>;
-  // While loading, keep the card on screen (with an empty token list) rather
-  // than swapping it for a hint — the empty-state hint only shows once the load
-  // has finished and genuinely returned nothing.
-  if (!loading && !tokens.length)
-    return <p className="panel__hint">{emptyHint}</p>;
-
   const selected = tokens.find((t) => t.id === tokenId);
-  const amountOk =
-    Number(amount) > 0 && Number(amount) <= Number(selected?.balance ?? 0);
-  const recipientPlaceholder = recipientKind === "xrpl" ? "r…" : "0zk…";
   const recipientValid =
     recipientKind === "xrpl"
       ? recipient.startsWith("r") &&
@@ -256,6 +386,52 @@ function AssetForm({
     recipientMode === "required" ||
     (recipientMode === "optional" && useAltRecipient);
   const recipientOk = !needRecipient || recipientValid;
+  // Only a complete address is worth showing in the header card, so a half-typed
+  // one leaves the destination pane on the wallet's own balance.
+  const destination =
+    needRecipient && recipientValid ? recipient.trim() : undefined;
+  const symbol = selected?.currency;
+
+  // Tell the header card which asset is in play, so it can show that asset's
+  // balance on both sides of the move this tab makes.
+  useEffect(() => {
+    onFlow({ symbol, destination });
+  }, [onFlow, symbol, destination]);
+
+  // Price the amount once the user pauses. The quote carries the amount it was
+  // made for, so a stale one is simply not rendered — no half-typed number ever
+  // gets priced as if it were final.
+  useEffect(() => {
+    if (!tokenId || !(Number(amount) > 0)) return;
+    let active = true;
+    setQuoteFailed(false);
+    const timer = setTimeout(() => {
+      onQuote(tokenId, amount)
+        .then((q) => active && setQuote(q))
+        .catch(() => {
+          // No quote at all (rather than a partial one). Drop the breakdown
+          // instead of leaving "Calculating fees…" up forever.
+          if (!active) return;
+          setQuote(null);
+          setQuoteFailed(true);
+        });
+    }, 400);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [onQuote, tokenId, amount]);
+
+  if (error) return <p className="panel__hint panel__hint--error">{error}</p>;
+  // While loading, keep the card on screen (with an empty token list) rather
+  // than swapping it for a hint — the empty-state hint only shows once the load
+  // has finished and genuinely returned nothing.
+  if (!loading && !tokens.length)
+    return <p className="panel__hint">{emptyHint}</p>;
+
+  const amountOk =
+    Number(amount) > 0 && Number(amount) <= Number(selected?.balance ?? 0);
+  const recipientPlaceholder = recipientKind === "xrpl" ? "r…" : "0zk…";
   const canSubmit =
     Boolean(selected) &&
     selected?.supported !== false &&
@@ -335,10 +511,20 @@ function AssetForm({
             placeholder="0"
           />
           {selected && (
-            <div className="asset-card__meta">
-              <span className="asset-card__balance">
-                Balance: {selected.balance}
-              </span>
+            <div className="asset-card__quick">
+              {AMOUNT_PRESETS.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  className={`asset-card__preset${
+                    amount === preset ? " asset-card__preset--active" : ""
+                  }`}
+                  disabled={Number(preset) > Number(selected.balance)}
+                  onClick={() => setAmount(preset)}
+                >
+                  {preset}
+                </button>
+              ))}
               <button
                 type="button"
                 className="asset-card__max"
@@ -350,6 +536,13 @@ function AssetForm({
           )}
         </div>
       </div>
+
+      {Number(amount) > 0 && !quoteFailed && (
+        <FeeBreakdown
+          quote={quote?.amount === amount ? quote : null}
+          receivesLabel={receivesLabel}
+        />
+      )}
 
       {recipientMode === "optional" && (
         <label className="field">

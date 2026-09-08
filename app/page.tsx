@@ -1,74 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useWallet } from "../lib/use-wallet";
+import { useAssetList } from "../lib/use-asset-list";
+import { FlowCard } from "../components/flow-card";
 import { WalletTabs } from "../components/wallet-tabs";
-import CopyIcon from "../components/icons/copy.svg";
-import CheckIcon from "../components/icons/check.svg";
-
-const shortAddress = (addr: string) =>
-  addr.length > 22 ? `${addr.slice(0, 12)}…${addr.slice(-6)}` : addr;
-
-// Copy `text` to the clipboard, falling back to a hidden textarea + execCommand
-// for the Xaman WebView, where the async Clipboard API is often unavailable.
-async function copyText(text: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    // fall through to the legacy path
-  }
-  try {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.setAttribute("readonly", "");
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand("copy");
-    document.body.removeChild(ta);
-    return ok;
-  } catch {
-    return false;
-  }
-}
-
-// The shielded (0zk) address, tap-to-copy with brief "Copied!" feedback.
-function CopyableAddress({ address }: { address: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const onCopy = async () => {
-    const ok = await copyText(address);
-    if (ok) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    }
-  };
-
-  return (
-    <button
-      type="button"
-      className="balance-card__address"
-      onClick={onCopy}
-      title="Copy shielded address"
-      aria-label={copied ? "Copied" : "Copy shielded address"}
-    >
-      <span className="balance-card__address-text">
-        {shortAddress(address)}
-      </span>
-      <span className="balance-card__copy" aria-hidden="true">
-        {copied ? (
-          <CheckIcon width={15} height={15} />
-        ) : (
-          <CopyIcon width={15} height={15} />
-        )}
-      </span>
-    </button>
-  );
-}
+import type { FlowSelection, TabId } from "../lib/types";
 
 export default function Page() {
   const {
@@ -76,12 +13,25 @@ export default function Page() {
     logs,
     shieldedTokens,
     scanState,
-    address,
     error,
     api,
     needsSignIn,
     signIn,
   } = useWallet();
+
+  // The active tab and the asset the form is working on both live here: the
+  // header card shows that asset's balance on either side of the move.
+  const [tab, setTab] = useState<TabId>("shield");
+  const [flow, setFlow] = useState<FlowSelection>({});
+  const onFlow = useCallback((next: FlowSelection) => setFlow(next), []);
+
+  // The connected XRPL wallet's assets back both the Shield form and the card's
+  // public pane. Re-read on every tab change so a bridge that has landed in the
+  // meantime shows up.
+  const publicAssets = useAssetList(
+    () => (api ? api.getXrplTokens() : Promise.resolve([])),
+    [api, tab],
+  );
 
   if (needsSignIn) {
     return (
@@ -111,31 +61,26 @@ export default function Page() {
 
   return (
     <main className="wallet">
-      <section className="balance-card">
-        <p className="balance-card__label">Shielded balance</p>
-        {scanState !== "complete" ? (
-          <p className="balance-card__scanning">Scanning…</p>
-        ) : shieldedTokens.length > 0 ? (
-          <ul className="balance-card__tokens">
-            {shieldedTokens.map((t) => (
-              <li key={t.address} className="balance-card__token">
-                <span className="balance-card__token-symbol">{t.symbol}</span>
-                <span className="balance-card__token-amount">{t.balance}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="balance-card__empty">No shielded balance yet</p>
-        )}
-        {address ? (
-          <CopyableAddress address={address} />
-        ) : (
-          <p className="balance-card__address">Connecting…</p>
-        )}
-      </section>
+      <FlowCard
+        tab={tab}
+        // XRP leads every token list, so it is also the right stand-in while the
+        // active form is still loading its own.
+        symbol={flow.symbol ?? "XRP"}
+        destination={flow.destination}
+        receive={flow.receive}
+        publicAssets={publicAssets}
+        shieldedTokens={shieldedTokens}
+        scanning={scanState !== "complete"}
+      />
 
       {api ? (
-        <WalletTabs api={api} />
+        <WalletTabs
+          api={api}
+          tab={tab}
+          onTabChange={setTab}
+          publicAssets={publicAssets}
+          onFlow={onFlow}
+        />
       ) : (
         <section className="panel__hint">
           {error

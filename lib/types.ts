@@ -5,6 +5,19 @@ export type LogFn = (msg: string) => void;
 /** The three directions the wallet can move funds in; one tab each. */
 export type TabId = "shield" | "transfer" | "unshield";
 
+/**
+ * What the active form tells the header card: the asset in play, and where the
+ * funds are headed when that is not the wallet's own account.
+ */
+export type FlowSelection = {
+  /** Display symbol of the selected token; absent while the list loads. */
+  symbol?: string;
+  /** A valid recipient address entered in the form, if any. */
+  destination?: string;
+  /** Showing the receive address: nothing is moving, so the card holds one balance. */
+  receive?: boolean;
+};
+
 /** A spendable asset in the connected XRPL wallet (see fetchXrplTokens). */
 export type XrplToken = {
   id: string;
