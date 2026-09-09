@@ -4,7 +4,6 @@ import { useCallback, useState } from "react";
 import { useWallet } from "../lib/use-wallet";
 import { useAssetList } from "../lib/use-asset-list";
 import { FlowCard } from "../components/flow-card";
-import { SyncStrip } from "../components/sync-strip";
 import { WalletTabs } from "../components/wallet-tabs";
 import type { FlowSelection, TabId } from "../lib/types";
 
@@ -12,6 +11,7 @@ export default function Page() {
   const {
     status,
     logs,
+    address,
     shieldedTokens,
     scanState,
     error,
@@ -68,13 +68,11 @@ export default function Page() {
         // active form is still loading its own.
         symbol={flow.symbol ?? "XRP"}
         destination={flow.destination}
-        receive={flow.receive}
         publicAssets={publicAssets}
         shieldedTokens={shieldedTokens}
-        scanning={scanState.phase !== "complete"}
+        scan={scanState}
+        address={address}
       />
-
-      <SyncStrip scan={scanState} />
 
       {api ? (
         <WalletTabs

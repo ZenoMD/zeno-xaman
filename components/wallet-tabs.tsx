@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { copyText } from "../lib/clipboard";
 import { useAssetList, type AssetListState } from "../lib/use-asset-list";
 import type {
   FeeQuote,
@@ -108,9 +107,10 @@ function ShieldPanel({
   );
 }
 
-// Private transfer: send a shielded balance to another 0zk address, or show your
-// own address to be paid at. Funds stay in the pool either way (the broadcaster
-// pays EVM gas), so both directions live behind one Send/Receive switch.
+// Private transfer: send a shielded balance to another 0zk address. Funds stay
+// in the pool (the broadcaster pays EVM gas). Receiving is not a direction of
+// travel, so it is not a mode here: the address to be paid at sits on the header
+// card, next to the balance that arrives at it.
 function TransferPanel({
   api,
   onFlow,
@@ -118,7 +118,6 @@ function TransferPanel({
   api: WalletApi;
   onFlow: (flow: FlowSelection) => void;
 }) {
-  const [mode, setMode] = useState<"send" | "receive">("send");
   const { loading, tokens, error } = useAssetList(
     () => api.getShieldedTokens(),
     [api],
@@ -130,85 +129,27 @@ function TransferPanel({
   );
 
   return (
-    <div className="panel">
-      <div className="segment" role="tablist">
-        {(["send", "receive"] as const).map((m) => (
-          <button
-            key={m}
-            type="button"
-            role="tab"
-            aria-selected={mode === m}
-            className={`segment__option${mode === m ? " segment__option--active" : ""}`}
-            onClick={() => setMode(m)}
-          >
-            {m === "send" ? "Send" : "Receive"}
-          </button>
-        ))}
-      </div>
-
-      {mode === "send" ? (
-        <AssetForm
-          loading={loading}
-          error={error}
-          tokens={tokens}
-          emptyHint="No shielded balance yet. Shield some funds first."
-          action="Transfer"
-          busyLabel="Proving & sending…"
-          recipientMode="required"
-          recipientHint="Recipient's 0zk address · stays private in the pool"
-          onFlow={onFlow}
-          onQuote={onQuote}
-          receivesLabel="Recipient receives"
-          onSubmit={async ({ tokenId, amount, recipientAddress }) => {
-            const res = await api.transfer({
-              tokenAddress: tokenId,
-              amount,
-              recipientAddress: recipientAddress!,
-            });
-            return { txid: res.txHash };
-          }}
-        />
-      ) : (
-        <ReceivePanel address={api.railgunAddress} onFlow={onFlow} />
-      )}
-    </div>
-  );
-}
-
-// Receive: the wallet's own 0zk address, in full, to hand to a sender. Shielded
-// funds can only be addressed to it, so it is safe to share.
-function ReceivePanel({
-  address,
-  onFlow,
-}: {
-  address: string;
-  onFlow: (flow: FlowSelection) => void;
-}) {
-  const [copied, setCopied] = useState(false);
-
-  // Nothing is moving while receiving, so the header card drops to one balance.
-  useEffect(() => {
-    onFlow({ receive: true });
-  }, [onFlow]);
-
-  const onCopy = async () => {
-    if (!(await copyText(address))) return;
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
-
-  return (
-    <div className="receive">
-      <p className="receive__label">Your shielded address</p>
-      <p className="receive__address">{address}</p>
-      <button type="button" className="btn receive__copy" onClick={onCopy}>
-        {copied ? "Copied" : "Copy address"}
-      </button>
-      <p className="field__hint">
-        Anyone can shield or transfer to this address. What arrives stays
-        private in the pool.
-      </p>
-    </div>
+    <AssetForm
+      loading={loading}
+      error={error}
+      tokens={tokens}
+      emptyHint="No shielded balance yet. Shield some funds first."
+      action="Transfer"
+      busyLabel="Proving & sending…"
+      recipientMode="required"
+      recipientHint="Recipient's 0zk address · stays private in the pool"
+      onFlow={onFlow}
+      onQuote={onQuote}
+      receivesLabel="Recipient receives"
+      onSubmit={async ({ tokenId, amount, recipientAddress }) => {
+        const res = await api.transfer({
+          tokenAddress: tokenId,
+          amount,
+          recipientAddress: recipientAddress!,
+        });
+        return { txid: res.txHash };
+      }}
+    />
   );
 }
 

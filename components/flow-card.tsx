@@ -1,9 +1,18 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { copyText } from "../lib/clipboard";
 import { assetKey, trimAmount } from "../lib/tokens";
 import type { AssetListState } from "../lib/use-asset-list";
-import type { ShieldedTokenBalance, TabId } from "../lib/types";
+import type { ScanState, ShieldedTokenBalance, TabId } from "../lib/types";
 import ArrowIcon from "./icons/arrow-right.svg";
+import CheckIcon from "./icons/check.svg";
+import CopyIcon from "./icons/copy.svg";
+
+/** How long the finished sync edge holds teal before settling into the border. */
+const SYNC_CONFIRM_MS = 1400;
+/** How long the copied confirmation stays on the address row. */
+const COPIED_MS = 1500;
 
 const shortAddress = (addr: string, head = 8, tail = 4) =>
   addr.length > head + tail + 4
@@ -42,8 +51,14 @@ type PaneProps = {
   symbol: string;
   /** Formatted balance for this side; treated as zero once it is known. */
   amount?: string;
-  /** First read of this side is still in flight; there is nothing to show yet. */
-  pending?: boolean;
+  /** Shown in place of the balance while the first read is in flight. */
+  pending?: string;
+  /**
+   * The pending readout carries its own figure, so it drops the spinner: the
+   * card's bottom edge is already drawing that progress. Indeterminate waits
+   * keep the spinner, since nothing else is moving for them.
+   */
+  measured?: boolean;
   /** The read failed, so the balance is unknown — not zero. */
   unavailable?: boolean;
   /** Recipient address entered in the form — replaces the balance readout. */
@@ -57,6 +72,7 @@ function Pane({
   symbol,
   amount,
   pending,
+  measured,
   unavailable,
   address,
 }: PaneProps) {
@@ -67,8 +83,12 @@ function Pane({
       return <p className="flow-card__note">another account</p>;
     if (pending)
       return (
-        <p className="flow-card__pending">
-          {side === "shielded" ? "Scanning…" : "Loading…"}
+        <p
+          className={`flow-card__pending${
+            measured ? " flow-card__pending--measured" : ""
+          }`}
+        >
+          {pending}
         </p>
       );
     return (
@@ -89,6 +109,48 @@ function Pane({
   );
 }
 
+/**
+ * The wallet's own shielded address, on the card that holds its balance. It is
+ * an identity, not a direction of travel, so it lives here permanently rather
+ * than behind a Receive mode competing with Shield/Transfer/Unshield.
+ */
+function AddressRow({ address }: { address: string }) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), COPIED_MS);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  const onCopy = async () => {
+    if (await copyText(address)) setCopied(true);
+  };
+
+  return (
+    <button
+      type="button"
+      className="flow-card__address"
+      onClick={onCopy}
+      aria-label={copied ? "Address copied" : "Copy your shielded address"}
+    >
+      <span className="flow-card__address-lead">
+        {copied ? "Address copied" : "Receive at"}
+      </span>
+      <span className="flow-card__address-value">
+        {shortAddress(address, 12, 6)}
+      </span>
+      <span className="flow-card__address-icon" aria-hidden="true">
+        {copied ? (
+          <CheckIcon width={15} height={15} />
+        ) : (
+          <CopyIcon width={15} height={15} />
+        )}
+      </span>
+    </button>
+  );
+}
+
 export type FlowCardProps = {
   /** Active tab: sets the direction and what each pane holds. */
   tab: TabId;
@@ -98,30 +160,48 @@ export type FlowCardProps = {
   publicAssets: AssetListState;
   /** Live shielded balances (the shielded side). */
   shieldedTokens: ShieldedTokenBalance[];
-  /** True until the shielded scan completes, when balances aren't trustworthy. */
-  scanning: boolean;
+  /** Shielded-balance sync: drives the pending pane and the card's bottom edge. */
+  scan: ScanState;
+  /** This wallet's 0zk address, once derived. */
+  address?: string | null;
   /** Recipient entered in the form, if the funds are going to another account. */
   destination?: string;
-  /** Receiving: nothing is moving, so the card collapses to one balance. */
-  receive?: boolean;
 };
 
 /**
  * The wallet header: the selected asset on both sides of the move the active tab
  * makes. The destination half sits behind a diagonal fold — pinstriped, with the
  * crease running through the arrow — so the direction reads before the labels do.
- * It replaced a single "Shielded balance" readout, which showed the pool balance
- * while the Shield form was spending the public one.
+ *
+ * The card also carries the two things that describe the wallet rather than the
+ * move: how far the shielded sync has got, drawn along its bottom edge, and the
+ * address that shielded funds arrive at.
  */
 export function FlowCard({
   tab,
   symbol,
   publicAssets,
   shieldedTokens,
-  scanning,
+  scan,
+  address,
   destination,
-  receive,
 }: FlowCardProps) {
+  // The edge holds teal for a beat when the sync lands, then fades into the
+  // ordinary hairline: completion is announced once and then stops being
+  // furniture. It stays mounted at zero opacity, because it is a 2px rule with
+  // nothing under it — cheaper than a second timer to unmount it.
+  const synced = scan.phase === "complete";
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    if (!synced) return;
+    const timer = setTimeout(() => setSettled(true), SYNC_CONFIRM_MS);
+    return () => clearTimeout(timer);
+  }, [synced]);
+
+  // Idle is 0, not 100: the wallet has not booted, so nothing has been scanned.
+  const pct =
+    scan.phase === "scanning" ? scan.progress * 100 : synced ? 100 : 0;
+
   const key = assetKey(symbol);
   const balances: Record<PaneSide, string | undefined> = {
     public: publicAssets.tokens.find((t) => assetKey(t.currency) === key)
@@ -131,33 +211,23 @@ export function FlowCard({
   };
   // A refresh keeps the previous list, so only the first read is "pending" —
   // the rest of the time the pane holds the last balance it knew.
-  const pending: Record<PaneSide, boolean> = {
-    public: publicAssets.loading && !publicAssets.tokens.length,
-    shielded: scanning,
-    recipient: false,
+  const pending: Record<PaneSide, string | undefined> = {
+    public:
+      publicAssets.loading && !publicAssets.tokens.length
+        ? "Loading…"
+        : undefined,
+    shielded: synced
+      ? undefined
+      : scan.phase === "scanning"
+        ? `Scanning ${Math.round(scan.progress * 100)}%`
+        : "Scanning…",
+    recipient: undefined,
   };
   const unavailable: Record<PaneSide, boolean> = {
     public: Boolean(publicAssets.error),
     shielded: false,
     recipient: false,
   };
-
-  if (receive) {
-    return (
-      <section className="flow-card flow-card--single">
-        <div className="flow-card__panes">
-          <Pane
-            side="shielded"
-            role="source"
-            align="left"
-            symbol={symbol}
-            amount={balances.shielded}
-            pending={pending.shielded}
-          />
-        </div>
-      </section>
-    );
-  }
 
   const { left, right, direction } = FLOW[tab];
   const destinationSide = direction === "right" ? right : left;
@@ -170,6 +240,7 @@ export function FlowCard({
       symbol={symbol}
       amount={balances[side]}
       pending={pending[side]}
+      measured={side === "shielded" && scan.phase === "scanning"}
       unavailable={unavailable[side]}
       address={side === destinationSide ? destination : undefined}
     />
@@ -186,6 +257,22 @@ export function FlowCard({
           </span>
         </div>
         {pane(right, "right")}
+      </div>
+
+      {address ? (
+        <div className="flow-card__footer">
+          <AddressRow address={address} />
+        </div>
+      ) : null}
+
+      {/* Announced in the pane above as text; this is its visual twin. */}
+      <div className="flow-card__sync" aria-hidden="true">
+        <div
+          className={`flow-card__sync-fill${synced ? " flow-card__sync-fill--done" : ""}${
+            settled ? " flow-card__sync-fill--settled" : ""
+          }`}
+          style={{ width: `${pct}%` }}
+        />
       </div>
     </section>
   );

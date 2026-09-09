@@ -31,8 +31,6 @@ export type FlowSelection = {
   symbol?: string;
   /** A valid recipient address entered in the form, if any. */
   destination?: string;
-  /** Showing the receive address: nothing is moving, so the card holds one balance. */
-  receive?: boolean;
 };
 
 /** A spendable asset in the connected XRPL wallet (see fetchXrplTokens). */
