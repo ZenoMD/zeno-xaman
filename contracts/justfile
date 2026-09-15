@@ -35,3 +35,18 @@ deploy:
         --broadcast \
         {{ if verifier_url != "" { "--verify --verifier blockscout --verifier-url " + verifier_url } else { "" } }} \
         --constructor-args {{its}} {{pool}}
+
+# Add (or, with allowed=false, remove) a source address on the deployed
+# router's allow list. Reads PRIVATE_KEY (must hold ALLOW_LIST_MODIFIER_ROLE)
+# and ROUTER_ADDRESS from env. `source` is a plain XRPL address (e.g.
+# rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH) — UTF-8-encoded to bytes here to match
+# what setAllowedSourceAddress expects.
+#   ROUTER_ADDRESS=0x... PRIVATE_KEY=0x... just whitelist rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH
+#   ROUTER_ADDRESS=0x... PRIVATE_KEY=0x... just whitelist rN7n7otQDd6FczFgLdSqtcsAUxDkw6fzRH false
+whitelist source allowed="true":
+    @test -n "${PRIVATE_KEY:-}" || (echo "set PRIVATE_KEY in your environment" && exit 1)
+    @test -n "${ROUTER_ADDRESS:-}" || (echo "set ROUTER_ADDRESS to the deployed router" && exit 1)
+    cast send "${ROUTER_ADDRESS}" \
+        "setAllowedSourceAddress(bytes,bool)" "$(cast from-utf8 '{{source}}')" {{allowed}} \
+        --rpc-url {{rpc}} \
+        --private-key "${PRIVATE_KEY}"

@@ -4,7 +4,7 @@ import type { LogFn, XrplToken } from "./types";
 
 export const AXELAR_GATEWAY = "rfmS3zqrQrka8wVyhXifEeyTwe8AMz2Yhw";
 export const DESTINATION_CHAIN = "xrpl-evm";
-export const POOL_ROUTER_ADDRESS = "0x43D9c6CD452aC2eCEe7a22a3b659154eDAf1DaFB";
+export const POOL_ROUTER_ADDRESS = "0x7F8AEC8fcFDbAa9fECcBE4bEf3efF6cD838e2b9d";
 
 // Links on-chain transactions to this xApp
 export const SOURCE_TAG = 2606220004;

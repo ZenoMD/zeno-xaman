@@ -6,3 +6,6 @@ out/
 public/sqlite3.wasm
 
 .env*.local
+
+# Deployer keys — never committed.
+.deploy-wallet
