@@ -1,0 +1,68 @@
+# Builds the Next.js static export and deploys it to Cloudflare Pages with Wrangler.
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   – token with the "Cloudflare Pages: Edit" permission
+#   CLOUDFLARE_ACCOUNT_ID  – your Cloudflare account ID
+#
+# The Pages project name defaults to "zeno-xaman"; override via CF_PAGES_PROJECT below.
+
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - '**'
+
+env:
+  CF_PAGES_PROJECT: zeno-xaman
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache Bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ hashFiles('bun.lock') }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: out
+          path: out/
+          retention-days: 7
+
+  deploy:
+    needs: build
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    environment:
+      name: cloudflare-pages
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: out
+          path: out
+
+      - name: Deploy to Cloudflare Pages
+        run: >-
+          npx --yes wrangler pages deploy out
+          --project-name "$CF_PAGES_PROJECT"
+          --branch "${{ github.ref_name }}"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
