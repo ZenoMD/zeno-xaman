@@ -5,6 +5,7 @@ import { useAssetList, type AssetListState } from "../lib/use-asset-list";
 import type {
   FeeQuote,
   FlowSelection,
+  ScanState,
   ShieldParams,
   TabId,
   TransferLaunchParams,
@@ -42,6 +43,13 @@ export type WalletTabsProps = {
   onFlow: (flow: FlowSelection) => void;
   /** Pre-fills the Transfer tab from a payment request the xApp launched with. */
   transferPrefill?: TransferLaunchParams;
+  /**
+   * Shielded-balance sync phase. The Transfer/Unshield tabs load their token
+   * picker once on mount, which can land before the merkletree scan has
+   * produced any balances — passing this lets them re-load once syncing
+   * finishes instead of getting stuck showing "no shielded balance".
+   */
+  scanState: ScanState;
 };
 
 export function WalletTabs({
@@ -51,6 +59,7 @@ export function WalletTabs({
   publicAssets,
   onFlow,
   transferPrefill,
+  scanState,
 }: WalletTabsProps) {
   return (
     <div className="tabs">
@@ -73,9 +82,16 @@ export function WalletTabs({
           <ShieldPanel api={api} publicAssets={publicAssets} onFlow={onFlow} />
         )}
         {tab === "transfer" && (
-          <TransferPanel api={api} onFlow={onFlow} prefill={transferPrefill} />
+          <TransferPanel
+            api={api}
+            onFlow={onFlow}
+            prefill={transferPrefill}
+            scanState={scanState}
+          />
         )}
-        {tab === "unshield" && <UnshieldPanel api={api} onFlow={onFlow} />}
+        {tab === "unshield" && (
+          <UnshieldPanel api={api} onFlow={onFlow} scanState={scanState} />
+        )}
       </div>
     </div>
   );
@@ -121,15 +137,21 @@ function TransferPanel({
   api,
   onFlow,
   prefill,
+  scanState,
 }: {
   api: WalletApi;
   onFlow: (flow: FlowSelection) => void;
   /** Pre-fills token/amount/recipient from a payment request the xApp launched with. */
   prefill?: TransferLaunchParams;
+  scanState: ScanState;
 }) {
+  // Re-load once the shielded-balance scan finishes: the first load can land
+  // while it's still running (mounting straight into this tab, e.g. from a
+  // payment-request deep link, races the boot-time scan), which would
+  // otherwise strand the picker on an empty list forever.
   const { loading, tokens, error } = useAssetList(
     () => api.getShieldedTokens(),
-    [api],
+    [api, scanState.phase],
   );
   const onQuote = useCallback(
     (tokenAddress: string, amount: string) =>
@@ -172,13 +194,17 @@ function TransferPanel({
 function UnshieldPanel({
   api,
   onFlow,
+  scanState,
 }: {
   api: WalletApi;
   onFlow: (flow: FlowSelection) => void;
+  scanState: ScanState;
 }) {
+  // See TransferPanel: re-load once the shielded-balance scan finishes so an
+  // early mount doesn't strand the picker on an empty list.
   const { loading, tokens, error } = useAssetList(
     () => api.getShieldedTokens(),
-    [api],
+    [api, scanState.phase],
   );
   const onQuote = useCallback(
     (tokenAddress: string, amount: string) =>

@@ -101,12 +101,13 @@ export default function Page() {
           publicAssets={publicAssets}
           onFlow={onFlow}
           transferPrefill={transferPrefill}
+          scanState={scanState}
         />
       ) : (
         <section className="panel__hint">
           {error
             ? `Wallet failed to start: ${error.message}`
-            : "Setting up your shielded wallet…"}
+            : "Unlocking your shielded wallet…"}
           {/* Boot only: names the step the hint above is generic about. Once the
               wallet is up there is no step left to report, and the line would
               just hold the last thing that happened to log. */}
