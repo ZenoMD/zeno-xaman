@@ -7,6 +7,7 @@ import type {
   FlowSelection,
   ShieldParams,
   TabId,
+  TransferLaunchParams,
   WalletApi,
   XrplToken,
 } from "../lib/types";
@@ -39,6 +40,8 @@ export type WalletTabsProps = {
   publicAssets: AssetListState;
   /** Reports the active form's asset + destination up to the header card. */
   onFlow: (flow: FlowSelection) => void;
+  /** Pre-fills the Transfer tab from a payment request the xApp launched with. */
+  transferPrefill?: TransferLaunchParams;
 };
 
 export function WalletTabs({
@@ -47,6 +50,7 @@ export function WalletTabs({
   onTabChange,
   publicAssets,
   onFlow,
+  transferPrefill,
 }: WalletTabsProps) {
   return (
     <div className="tabs">
@@ -68,7 +72,9 @@ export function WalletTabs({
         {tab === "shield" && (
           <ShieldPanel api={api} publicAssets={publicAssets} onFlow={onFlow} />
         )}
-        {tab === "transfer" && <TransferPanel api={api} onFlow={onFlow} />}
+        {tab === "transfer" && (
+          <TransferPanel api={api} onFlow={onFlow} prefill={transferPrefill} />
+        )}
         {tab === "unshield" && <UnshieldPanel api={api} onFlow={onFlow} />}
       </div>
     </div>
@@ -114,9 +120,12 @@ function ShieldPanel({
 function TransferPanel({
   api,
   onFlow,
+  prefill,
 }: {
   api: WalletApi;
   onFlow: (flow: FlowSelection) => void;
+  /** Pre-fills token/amount/recipient from a payment request the xApp launched with. */
+  prefill?: TransferLaunchParams;
 }) {
   const { loading, tokens, error } = useAssetList(
     () => api.getShieldedTokens(),
@@ -141,6 +150,9 @@ function TransferPanel({
       onFlow={onFlow}
       onQuote={onQuote}
       receivesLabel="Recipient receives"
+      initialTokenId={prefill?.tokenAddress}
+      initialAmount={prefill?.amount}
+      initialRecipient={prefill?.recipientAddress}
       onSubmit={async ({ tokenId, amount, recipientAddress }) => {
         const res = await api.transfer({
           tokenAddress: tokenId,
@@ -264,6 +276,10 @@ type AssetFormProps = {
   /** Text for the optional-recipient checkbox / required-recipient field label. */
   recipientLabel?: string;
   recipientHint?: string;
+  /** Pre-fill the token/amount/recipient fields, e.g. from a payment request. */
+  initialTokenId?: string;
+  initialAmount?: string;
+  initialRecipient?: string;
   /** Reports the selected asset + any explicit destination to the header card. */
   onFlow: (flow: FlowSelection) => void;
   /**
@@ -292,16 +308,21 @@ function AssetForm({
   recipientKind = "0zk",
   recipientLabel,
   recipientHint,
+  initialTokenId,
+  initialAmount,
+  initialRecipient,
   onFlow,
   onQuote,
   receivesLabel,
   onExplorer,
   onSubmit,
 }: AssetFormProps) {
-  const [tokenId, setTokenId] = useState("");
-  const [amount, setAmount] = useState("");
-  const [useAltRecipient, setUseAltRecipient] = useState(false);
-  const [recipient, setRecipient] = useState("");
+  const [tokenId, setTokenId] = useState(initialTokenId ?? "");
+  const [amount, setAmount] = useState(initialAmount ?? "");
+  const [useAltRecipient, setUseAltRecipient] = useState(
+    Boolean(initialRecipient),
+  );
+  const [recipient, setRecipient] = useState(initialRecipient ?? "");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result>(null);
   const [quote, setQuote] = useState<FeeQuote | null>(null);

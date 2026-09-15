@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useWallet } from "../lib/use-wallet";
 import { useAssetList } from "../lib/use-asset-list";
 import { FlowCard } from "../components/flow-card";
 import { WalletTabs } from "../components/wallet-tabs";
-import type { FlowSelection, TabId } from "../lib/types";
+import { readTransferLaunchParams } from "../lib/launch-params";
+import type { FlowSelection, TabId, TransferLaunchParams } from "../lib/types";
 
 export default function Page() {
   const {
@@ -24,7 +25,25 @@ export default function Page() {
   // header card shows that asset's balance on either side of the move.
   const [tab, setTab] = useState<TabId>("shield");
   const [flow, setFlow] = useState<FlowSelection>({});
+  const [transferPrefill, setTransferPrefill] = useState<
+    TransferLaunchParams | undefined
+  >();
   const onFlow = useCallback((next: FlowSelection) => setFlow(next), []);
+
+  // A payment request can launch the xApp with token/amount/recipient already
+  // decided, carried in the OTT data (see lib/launch-params.ts) — jump straight
+  // into a pre-filled Transfer instead of the default Shield screen.
+  useEffect(() => {
+    let cancelled = false;
+    readTransferLaunchParams().then((params) => {
+      if (cancelled || !params) return;
+      setTransferPrefill(params);
+      setTab("transfer");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // The connected XRPL wallet's assets back both the Shield form and the card's
   // public pane. Re-read on every tab change so a bridge that has landed in the
@@ -81,6 +100,7 @@ export default function Page() {
           onTabChange={setTab}
           publicAssets={publicAssets}
           onFlow={onFlow}
+          transferPrefill={transferPrefill}
         />
       ) : (
         <section className="panel__hint">

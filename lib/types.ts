@@ -77,6 +77,18 @@ export type TransferParams = {
   memoText?: string;
 };
 
+/**
+ * A pre-filled Transfer request carried in the xApp's OTT data (a payment
+ * request QR/link opened the xApp). Same field conventions as `TransferParams`
+ * — `tokenAddress` is the EVM ERC20 address (as AxelarPoolRouter's `_token`),
+ * `amount` a human decimal string, `recipientAddress` a 0zk RAILGUN address.
+ */
+export type TransferLaunchParams = {
+  tokenAddress?: string;
+  amount?: string;
+  recipientAddress?: string;
+};
+
 export type UnshieldParams = {
   amount: string;
   /** shielded ERC20 to unshield (EVM address). */
