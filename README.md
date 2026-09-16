@@ -3,7 +3,6 @@
 ![Zeno logo](./logo.png)
 
 [![Build and Deploy](https://github.com/ZenoMD/zeno-xaman/actions/workflows/deploy.yml/badge.svg)](https://github.com/ZenoMD/zeno-xaman/actions/workflows/deploy.yml)
-[![License](https://img.shields.io/github/license/ZenoMD/zeno-xaman)](./LICENSE)
 
 A [XAMAN](https://xumm.app/?lang=en) xApp for convenient and compliant private payments on XRPL
 
