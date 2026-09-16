@@ -4,17 +4,15 @@
 
 [![Build and Deploy](https://github.com/ZenoMD/zeno-xaman/actions/workflows/deploy.yml/badge.svg)](https://github.com/ZenoMD/zeno-xaman/actions/workflows/deploy.yml)
 
-A [XAMAN](https://xumm.app/?lang=en) xApp for convenient and compliant private payments on XRPL
+Convenient and compliant private payments on XRPL
 
 ## About
 
-Zeno is a xApp for Xaman wallet that allows for fully shielded spends from an existing XRPL account. 
+Zeno is a xApp for Xaman wallet that allows unlocks private payments from your existing XRPL account. 
 
-Users simply open the xApp, unlock their shielded wallet, and then can shield/transfer/unshield XRP and other tokens. 
+Simply open the xApp and then shield/transfer/unshield XRP and other tokens. 
 
-The Zeno shielded pool is a permissioned domain and KYC is required for entry so users can be sure they are not interacting with bad actors.
-
-Access is currently via whitelist until a KYC partner can be found. To apply please install Xaman and complete the online form
+The Zeno shielded pool is a permissioned domain and KYC is required for entry so users can be sure they are not interacting with bad actors. Access is currently via whitelist until a suitable KYC partner can be found. To apply please install Xaman and complete the online form
 
 https://forms.gle/wQ8fKFYXetboBTp7A
 
