@@ -111,7 +111,12 @@ const NETWORKS: Record<string, NetworkProviders> = {
       {
         provider: "https://json-rpc.xrpl.cumulo.org.es",
         priority: 1,
-        weight: 2,
+        weight: 1,
+      },
+      {
+        provider: "https://rpc.xrplevm.org",
+        priority: 2,
+        weight: 1,
       },
     ],
   },
