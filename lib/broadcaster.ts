@@ -132,6 +132,10 @@ export async function stopBroadcasterClient(
 // incomplete than block the form.
 export const BROADCASTER_WAIT_MS = 45000;
 
+// Each probe is a synchronous read of the client's fee cache, so polling costs
+// nothing and a fine interval just means a fee is noticed sooner after it lands.
+const BROADCASTER_POLL_MS = 500;
+
 // Poll for a broadcaster willing to accept `tokenAddress` as its fee token.
 // Fees arrive over Waku after connecting, so this isn't available immediately.
 async function waitForBroadcaster(
@@ -149,12 +153,15 @@ async function waitForBroadcaster(
       useRelayAdapt,
     );
     if (best) return best;
-    if (Date.now() > deadline) {
+    // Stop when the next probe would land past the deadline, so the wait never
+    // runs over the budget its caller set. Checking after the sleep instead used
+    // to overshoot by a full interval, and a quote that asked for 4s got 6s.
+    if (Date.now() + BROADCASTER_POLL_MS > deadline) {
       throw new Error(
         "No broadcaster found for the fee token (timed out waiting for fees)",
       );
     }
-    await new Promise((r) => setTimeout(r, 2000));
+    await new Promise((r) => setTimeout(r, BROADCASTER_POLL_MS));
     log("waiting for a broadcaster…");
   }
 }
