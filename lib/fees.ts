@@ -46,9 +46,14 @@ const INCOMPLETE_TTL_MS = 5_000;
 // Typing digit by digit mints a new cache key per keystroke; bound the map.
 const MAX_CACHE_ENTRIES = 32;
 
-// How long a quote waits for a broadcaster fee message. Short: an unpriced line
-// is a better answer than a form that sits still for the submission's 45s.
-const QUOTE_BROADCASTER_WAIT_MS = 4000;
+// How long a quote waits for a broadcaster fee message. Still far short of the
+// submission's 45s, since an unpriced line beats a form that sits still, but
+// long enough to cover a cold Waku start: measured against
+// broadcaster-nwaku.fly.dev, the first fee message arrived 4.8s, 5.3s and 6.3s
+// after `start()` resolved, so the old 4s budget missed all three. A quote made
+// between the broadcaster's ~15.6s republishes still comes back incomplete; the
+// form re-prices it rather than waiting that out inline.
+const QUOTE_BROADCASTER_WAIT_MS = 8000;
 
 const cache = new Map<string, { quote: FeeQuote; at: number; ttl: number }>();
 const inFlight = new Map<string, Promise<FeeQuote>>();
