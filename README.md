@@ -18,12 +18,12 @@ https://forms.gle/wQ8fKFYXetboBTp7A
 
 ## Architecture
 
-Zeno uses the well established and trusted RAILGUN protocol (currently securing over $77 million) deployed to the XRPL EVM sidechain as the underlying shielded pool. Users to not need to have an EVM wallet to transact thanks to a number of bridging and gas sponsoring tricks.
+Zeno uses the well established and trusted RAILGUN protocol (currently securing over $77 million) deployed to the XRPL EVM sidechain as the underlying shielded pool. Users do not require an EVM address thanks to a number of bridging and gas sponsoring tricks.
 
 - Deposits go via the canonical Axelar bridge directly into the pool. EVM gas is paid by the Axelar relay
-- Shielded transfers/withdrawals are relayed via our custom relaying service and the relayers are reimbursed for gas with shielded payments. This also preserves privacy by ensuring transfers do not have the spenders public signature attached
+- Shielded transfers/withdrawals are relayed via our custom broadcasting service and the broadcasters are reimbursed for gas with shielded tokens. This also preserves privacy by ensuring transfers do not have the spenders public signature attached
 
-The result is full account abstraction of the EVM chain and spend authorization is directly tied to the XRPL wallet keys.
+The result is full account abstraction of the EVM chain and spend authorization directly tied to the XRPL wallet keys.
 
 Zeno is also a [permissioned domain](https://xls.xrpl.org/xls/XLS-0080-permissioned-domains.html). It handles compliance in an XRPL native way requiring approved credentials before deposits into the pool are allowed.
 
