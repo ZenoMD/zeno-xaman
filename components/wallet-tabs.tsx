@@ -18,6 +18,19 @@ import ChevronIcon from "./icons/chevron-down.svg";
 // the header card already shows the side being spent from.
 const AMOUNT_PRESETS = ["0.1", "1", "10"];
 
+// How long the form waits for typing to settle before pricing the amount.
+const QUOTE_DEBOUNCE_MS = 400;
+
+// A quote that comes back missing its broadcaster fee is usually just early:
+// the broadcaster republishes fees on a ~15.6s cycle (measured against
+// broadcaster-nwaku.fly.dev), so a quote made just after one lands waits most of
+// a cycle for the next. Re-price before showing the gap as an error. Three
+// retries at this delay, each waiting out lib/fees.ts QUOTE_BROADCASTER_WAIT_MS,
+// keep trying for ~50s, covering three republish cycles. The delay must exceed
+// that file's INCOMPLETE_TTL_MS, or a retry just reads the cached gap back.
+const QUOTE_RETRY_MS = 6000;
+const QUOTE_RETRY_LIMIT = 3;
+
 const TABS: { id: TabId; label: string }[] = [
   { id: "shield", label: "Shield" },
   { id: "transfer", label: "Transfer" },
@@ -245,9 +258,12 @@ function UnshieldPanel({
 function FeeBreakdown({
   quote,
   receivesLabel,
+  pending,
 }: {
   quote: FeeQuote | null;
   receivesLabel: string;
+  /** The quote is incomplete but being re-priced, so its gap is not final. */
+  pending: boolean;
 }) {
   if (!quote) return <p className="fees__pending">Calculating fees…</p>;
 
@@ -279,7 +295,12 @@ function FeeBreakdown({
         </span>
       </div>
 
-      {quote.incomplete && <p className="fees__warning">{quote.incomplete}</p>}
+      {quote.incomplete &&
+        (pending ? (
+          <p className="fees__pending">Still quoting the broadcaster fee…</p>
+        ) : (
+          <p className="fees__warning">{quote.incomplete}</p>
+        ))}
     </div>
   );
 }
@@ -353,6 +374,8 @@ function AssetForm({
   const [result, setResult] = useState<Result>(null);
   const [quote, setQuote] = useState<FeeQuote | null>(null);
   const [quoteFailed, setQuoteFailed] = useState(false);
+  // An incomplete quote with a retry still to come: shown as pending, not error.
+  const [quotePending, setQuotePending] = useState(false);
 
   // Default-select the first selectable token once the list loads. Skip tokens
   // the Axelar bridge can't accept (supported === false) so the form never
@@ -389,21 +412,38 @@ function AssetForm({
   // Price the amount once the user pauses. The quote carries the amount it was
   // made for, so a stale one is simply not rendered — no half-typed number ever
   // gets priced as if it were final.
+  //
+  // A quote that comes back incomplete is re-priced rather than left on screen:
+  // the usual cause is a broadcaster fee message that has not arrived yet, and
+  // nothing else would ever ask again. Until the retries run out the gap shows
+  // as pending, not as an error, so a fee that is merely late never renders red.
   useEffect(() => {
     if (!tokenId || !(Number(amount) > 0)) return;
     let active = true;
+    let timer: ReturnType<typeof setTimeout>;
     setQuoteFailed(false);
-    const timer = setTimeout(() => {
+    setQuotePending(false);
+
+    const run = (attempt: number) => {
       onQuote(tokenId, amount)
-        .then((q) => active && setQuote(q))
+        .then((q) => {
+          if (!active) return;
+          setQuote(q);
+          const retry = Boolean(q.incomplete) && attempt < QUOTE_RETRY_LIMIT;
+          setQuotePending(retry);
+          if (retry) timer = setTimeout(() => run(attempt + 1), QUOTE_RETRY_MS);
+        })
         .catch(() => {
           // No quote at all (rather than a partial one). Drop the breakdown
           // instead of leaving "Calculating fees…" up forever.
           if (!active) return;
           setQuote(null);
+          setQuotePending(false);
           setQuoteFailed(true);
         });
-    }, 400);
+    };
+
+    timer = setTimeout(() => run(0), QUOTE_DEBOUNCE_MS);
     return () => {
       active = false;
       clearTimeout(timer);
@@ -529,6 +569,7 @@ function AssetForm({
         <FeeBreakdown
           quote={quote?.amount === amount ? quote : null}
           receivesLabel={receivesLabel}
+          pending={quotePending}
         />
       )}
 
