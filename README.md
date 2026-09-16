@@ -1,8 +1,34 @@
-# Zeno XAMAN
+# Zeno Wallet
 
-A [XAMAN](https://xumm.app/?lang=en) xApp demonstrating shielded pool support.
+![Zeno logo](./logo.png)
 
-This is currently a WIP spike but it has aspirations to be a fully functional RAILGUN compatible shielded wallet that can run within the XAMAN XRPL wallet
+[![Build and Deploy](https://github.com/ZenoMD/zeno-xaman/actions/workflows/deploy.yml/badge.svg)](https://github.com/ZenoMD/zeno-xaman/actions/workflows/deploy.yml)
+[![License](https://img.shields.io/github/license/ZenoMD/zeno-xaman)](./LICENSE)
+
+A [XAMAN](https://xumm.app/?lang=en) xApp for convenient and compliant private payments on XRPL
+
+## About
+
+Zeno is a xApp for Xaman wallet that allows for fully shielded spends from an existing XRPL account. 
+
+Users simply open the xApp, unlock their shielded wallet, and then can shield/transfer/unshield XRP and other tokens. 
+
+The Zeno shielded pool is a permissioned domain and KYC is required for entry so users can be sure they are not interacting with bad actors.
+
+Access is currently via whitelist until a KYC partner can be found. To apply please install Xaman and complete the online form
+
+https://forms.gle/wQ8fKFYXetboBTp7A
+
+## Architecture
+
+Zeno uses the well established and trusted RAILGUN protocol (currently securing over $77 million) deployed to the XRPL EVM sidechain as the underlying shielded pool. Users to not need to have an EVM wallet to transact thanks to a number of bridging and gas sponsoring tricks.
+
+- Deposits go via the canonical Axelar bridge directly into the pool. EVM gas is paid by the Axelar relay
+- Shielded transfers/withdrawals are relayed via our custom relaying service and the relayers are reimbursed for gas with shielded payments. This also preserves privacy by ensuring transfers do not have the spenders public signature attached
+
+The result is full account abstraction of the EVM chain and spend authorization is directly tied to the XRPL wallet keys.
+
+Zeno is also a [permissioned domain](https://xls.xrpl.org/xls/XLS-0080-permissioned-domains.html). It handles compliance in an XRPL native way requiring approved credentials before deposits into the pool are allowed.
 
 ## Local Development
 
@@ -20,6 +46,10 @@ cloudflared tunnel --url http://localhost:3000
 ```
 
 Attach the resulting URL to a xApp in the [Xaman developer console](https://apps.xaman.dev/) and test either on-device or using the xAppBuilder application.
+
+### Contracts
+
+See [README](./contracts/README.md)
 
 ## Running as a web app (browser/web3)
 
@@ -42,4 +72,4 @@ the current page URL as the OAuth return URL, so an unlisted origin is rejected.
 
 ## License
 
-Unlicensed
+[AGPL-3.0](LICENSE), except the contracts in [contracts/](./contracts), which are [MIT](./contracts/LICENSE)
