@@ -1,5 +1,6 @@
-import { formatUnits } from "ethers";
+import { Contract, formatUnits, toUtf8Bytes } from "ethers";
 import { getXumm } from "./xumm-client";
+import { getMetaProvider } from "./railgun";
 import type { LogFn, XrplToken } from "./types";
 
 export const AXELAR_GATEWAY = "rfmS3zqrQrka8wVyhXifEeyTwe8AMz2Yhw";
@@ -27,6 +28,30 @@ const hex = (s: string): string =>
   Array.from(new TextEncoder().encode(s))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+
+// The router keys its allow list by the raw UTF-8 bytes of the XRPL source
+// address (see AxelarPoolRouter.sol's `allowList` mapping / justfile's
+// `cast from-utf8`), not an EVM address — there is no dedicated bool-returning
+// helper, so we read the public mapping getter directly.
+const ALLOW_LIST_ABI = ["function allowList(bytes) view returns (bool)"];
+
+/**
+ * Check whether `xrplAddress` is allowed to deposit through the router. Any
+ * failure (RPC error, etc.) is deliberately left to propagate rather than
+ * defaulting to "allowed" — an unverifiable check must block the deposit, not
+ * silently pass it.
+ */
+export async function isSourceAddressWhitelisted(
+  xrplAddress: string,
+  networkName: string,
+): Promise<boolean> {
+  const router = new Contract(
+    POOL_ROUTER_ADDRESS,
+    ALLOW_LIST_ABI,
+    getMetaProvider(networkName),
+  );
+  return router.allowList(toUtf8Bytes(xrplAddress));
+}
 
 type Memo = { Memo: { MemoType: string; MemoData: string } };
 

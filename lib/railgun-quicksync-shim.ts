@@ -134,7 +134,9 @@ async function gqlQuery<T>(query: string, blockNumber: string): Promise<T[]> {
     errors?: unknown;
   };
   if (json.errors) {
-    throw new Error(`Goldsky quickSync GraphQL error: ${JSON.stringify(json.errors)}`);
+    throw new Error(
+      `Goldsky quickSync GraphQL error: ${JSON.stringify(json.errors)}`,
+    );
   }
   const data = json.data ?? {};
   // Single root field per query; return its rows.
@@ -187,13 +189,21 @@ const graphTokenType = (t: string): TokenType =>
       ? TokenType.ERC1155
       : TokenType.ERC20;
 
-type GraphToken = { tokenType: string; tokenSubID: string; tokenAddress: string };
+type GraphToken = {
+  tokenType: string;
+  tokenSubID: string;
+  tokenAddress: string;
+};
 type GraphPreImage = { npk: string; value: string; token: GraphToken };
 
 const formatPreImage = (p: GraphPreImage) =>
   serializePreImage(
     p.npk,
-    serializeTokenData(p.token.tokenAddress, graphTokenType(p.token.tokenType), p.token.tokenSubID),
+    serializeTokenData(
+      p.token.tokenAddress,
+      graphTokenType(p.token.tokenType),
+      p.token.tokenSubID,
+    ),
     BigInt(p.value),
   );
 
@@ -216,7 +226,11 @@ interface GraphCommitment {
   batchStartTreePosition: number;
   encryptedRandom?: [string, string];
   preimage?: GraphPreImage;
-  legacyCiphertext?: { ciphertext: GraphCiphertext; ephemeralKeys: string[]; memo: string[] };
+  legacyCiphertext?: {
+    ciphertext: GraphCiphertext;
+    ephemeralKeys: string[];
+    memo: string[];
+  };
   ciphertext?: {
     ciphertext: GraphCiphertext;
     blindedSenderViewingKey: string;
@@ -280,8 +294,12 @@ const formatCommitment = (c: GraphCommitment): any => {
         commitmentType: CommitmentType.TransactCommitmentV2,
         ciphertext: {
           ciphertext: formatCiphertext(c.ciphertext!.ciphertext),
-          blindedReceiverViewingKey: formatTo32Bytes(c.ciphertext!.blindedReceiverViewingKey),
-          blindedSenderViewingKey: formatTo32Bytes(c.ciphertext!.blindedSenderViewingKey),
+          blindedReceiverViewingKey: formatTo32Bytes(
+            c.ciphertext!.blindedReceiverViewingKey,
+          ),
+          blindedSenderViewingKey: formatTo32Bytes(
+            c.ciphertext!.blindedSenderViewingKey,
+          ),
           memo: c.ciphertext!.memo,
           annotationData: c.ciphertext!.annotationData,
         },
@@ -320,7 +338,10 @@ const buildCommitmentEvents = (commitments: GraphCommitment[]) => {
     }
   }
   return [...batches.values()]
-    .sort((a, b) => a.treeNumber - b.treeNumber || a.startPosition - b.startPosition)
+    .sort(
+      (a, b) =>
+        a.treeNumber - b.treeNumber || a.startPosition - b.startPosition,
+    )
     .map((batch) => ({
       txid: formatTo32Bytes(batch.transactionHash),
       commitments: batch.commitments.map(formatCommitment),
@@ -345,7 +366,10 @@ export const quickSyncEventsGraph = async (
 
   // Only our chain, only V2 (XRPL EVM has supportsV3: false). Anything else →
   // empty, so the engine performs its default scan for that case.
-  if (chain.id !== XRPL_EVM_CHAIN_ID || txidVersion !== TXIDVersion.V2_PoseidonMerkle) {
+  if (
+    chain.id !== XRPL_EVM_CHAIN_ID ||
+    txidVersion !== TXIDVersion.V2_PoseidonMerkle
+  ) {
     return empty;
   }
 
@@ -388,5 +412,9 @@ export const quickSyncEventsGraph = async (
     `[quickSync/goldsky] from block ${fromBlock}: ${commitmentEvents.length} commitment batches, ${nullifierEvents.length} nullifiers, ${unshieldEvents.length} unshields`,
   );
 
-  return { commitmentEvents, unshieldEvents, nullifierEvents } as AccumulatedEvents;
+  return {
+    commitmentEvents,
+    unshieldEvents,
+    nullifierEvents,
+  } as AccumulatedEvents;
 };

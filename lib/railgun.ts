@@ -182,7 +182,7 @@ const ERC20_META_ABI = [
 const tokenMetaCache = new Map<string, { symbol: string; decimals: number }>();
 let metaProvider: JsonRpcProvider | undefined;
 
-const getMetaProvider = (networkName: string): JsonRpcProvider =>
+export const getMetaProvider = (networkName: string): JsonRpcProvider =>
   (metaProvider ??= new JsonRpcProvider(
     NETWORKS[networkName].providers[0].provider,
     undefined,

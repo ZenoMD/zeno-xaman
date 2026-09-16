@@ -11,7 +11,7 @@ name: Build and Deploy
 on:
   push:
     branches:
-      - '**'
+      - "**"
 
 env:
   CF_PAGES_PROJECT: zeno-xaman

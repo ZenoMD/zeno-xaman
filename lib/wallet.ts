@@ -9,7 +9,7 @@ import { SqliteLevelDown } from "./sqlite/leveldown";
 import { createSqliteArtifactStore } from "./artifact-store";
 import { getXumm } from "./xumm-client";
 import { fetchXrplTokens } from "./xrpl";
-import { shieldViaAxelar } from "./axelar";
+import { shieldViaAxelar, isSourceAddressWhitelisted } from "./axelar";
 import { buildShieldPayload } from "./shield-payload";
 import { DEV_ACCOUNT } from "./dev-account";
 import { trimAmount } from "./tokens";
@@ -156,6 +156,16 @@ export async function startWallet({
     const { account, tokens } = await fetchXrplTokens();
     const token = tokens.find((t) => t.id === tokenId);
     if (!token) throw new Error(`Token ${tokenId} not found in XRPL wallet`);
+
+    // The router only accepts deposits from allow-listed XRPL addresses; check
+    // before doing any further work so a non-whitelisted account fails fast
+    // rather than after building a payload or estimating gas.
+    const whitelisted = await isSourceAddressWhitelisted(account, NETWORK);
+    if (!whitelisted) {
+      throw new Error(
+        `XRPL address ${account} is not whitelisted to deposit. Contact the pool operator to be added.`,
+      );
+    }
 
     // Shield to a caller-supplied 0zk address if given, else to our own wallet.
     const railgunAddress = recipientAddress || wallet.railgunAddress;
