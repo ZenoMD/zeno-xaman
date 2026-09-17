@@ -161,14 +161,14 @@ async function quoteShield(
     const { shield } = await getPoolFeeBasisPoints(ctx.networkName);
     const fee = applyBasisPoints(amount, shield);
     lines.push({
-      label: `RAILGUN shield fee (${percent(shield)})`,
+      label: `Zeno shield fee (${percent(shield)})`,
       amount: fee,
       symbol,
       kind: "deducted",
     });
     receives = subtractDecimal(amount, fee);
   } catch (e) {
-    gaps.push(`RAILGUN shield fee could not be read (${reason(e)})`);
+    gaps.push(`Zeno shield fee could not be read (${reason(e)})`);
   }
 
   return {
@@ -296,7 +296,7 @@ async function quoteUnshield(
     const { unshield } = await getPoolFeeBasisPoints(ctx.networkName);
 
     lines.push({
-      label: `RAILGUN unshield fee (${percent(unshield)})`,
+      label: `Zeno unshield fee (${percent(unshield)})`,
       amount: format(unshieldFee, decimals),
       symbol,
       kind: "deducted",

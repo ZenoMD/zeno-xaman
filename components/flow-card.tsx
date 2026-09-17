@@ -203,9 +203,14 @@ export function FlowCard({
     scan.phase === "scanning" ? scan.progress * 100 : synced ? 100 : 0;
 
   const key = assetKey(symbol);
+  const publicToken = publicAssets.tokens.find(
+    (t) => assetKey(t.currency) === key,
+  );
   const balances: Record<PaneSide, string | undefined> = {
-    public: publicAssets.tokens.find((t) => assetKey(t.currency) === key)
-      ?.balance,
+    // Available (post-reserve) balance where known — same figure the Shield
+    // form's MAX button fills in — falling back to the raw ledger balance for
+    // assets with no reserve concept (issued currencies).
+    public: publicToken?.available ?? publicToken?.balance,
     shielded: shieldedTokens.find((t) => assetKey(t.symbol) === key)?.balance,
     recipient: undefined,
   };

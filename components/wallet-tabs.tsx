@@ -457,8 +457,10 @@ function AssetForm({
   if (!loading && !tokens.length)
     return <p className="panel__hint">{emptyHint}</p>;
 
-  const amountOk =
-    Number(amount) > 0 && Number(amount) <= Number(selected?.balance ?? 0);
+  // MAX and the amount cap use what's actually spendable (balance minus any
+  // XRPL reserve), not the raw ledger balance — see XrplToken.available.
+  const spendable = Number(selected?.available ?? selected?.balance ?? 0);
+  const amountOk = Number(amount) > 0 && Number(amount) <= spendable;
   const recipientPlaceholder = recipientKind === "xrpl" ? "r…" : "0zk…";
   const canSubmit =
     Boolean(selected) &&
@@ -547,7 +549,7 @@ function AssetForm({
                   className={`asset-card__preset${
                     amount === preset ? " asset-card__preset--active" : ""
                   }`}
-                  disabled={Number(preset) > Number(selected.balance)}
+                  disabled={Number(preset) > spendable}
                   onClick={() => setAmount(preset)}
                 >
                   {preset}
@@ -556,7 +558,7 @@ function AssetForm({
               <button
                 type="button"
                 className="asset-card__max"
-                onClick={() => setAmount(selected.balance)}
+                onClick={() => setAmount(selected.available ?? selected.balance)}
               >
                 MAX
               </button>
