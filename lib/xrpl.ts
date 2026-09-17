@@ -77,6 +77,28 @@ const xrplBatch = (
     };
   });
 
+// Fallback reserve if server_info can't be reached — current mainnet values
+// (1 XRP base + 0.2 XRP per owned object) as of the Feb 2024 fee reduction.
+// Used only so "available" degrades to a reasonable estimate rather than
+// vanishing; the live server_info figures are preferred whenever they load.
+const FALLBACK_RESERVE_BASE_XRP = 1;
+const FALLBACK_RESERVE_INC_XRP = 0.2;
+
+// The XRP locked up by the account's base + owner reserve, in XRP. `OwnerCount`
+// (trustlines, offers, etc.) comes off account_info; reserve_base_xrp/
+// reserve_inc_xrp come off server_info, which reports them already in XRP
+// (not drops).
+const reserveFor = (
+  accountData: Record<string, any>,
+  serverInfoReply: XrplReply | undefined,
+): number => {
+  const ledger = serverInfoReply?.result?.info?.validated_ledger;
+  const base = ledger?.reserve_base_xrp ?? FALLBACK_RESERVE_BASE_XRP;
+  const inc = ledger?.reserve_inc_xrp ?? FALLBACK_RESERVE_INC_XRP;
+  const ownerCount = Number(accountData.OwnerCount ?? 0);
+  return base + ownerCount * inc;
+};
+
 /**
  * List the spendable assets in the connected XRPL wallet: native XRP plus any
  * issued currencies with a positive trustline balance.
@@ -88,6 +110,7 @@ export async function fetchXrplTokens(): Promise<XrplTokens> {
   const res = await xrplBatch(wsUrl, [
     { command: "account_info", account, ledger_index: "validated" },
     { command: "account_lines", account, ledger_index: "validated" },
+    { command: "server_info" },
   ]);
 
   const tokens: XrplToken[] = [];
@@ -102,6 +125,7 @@ export async function fetchXrplTokens(): Promise<XrplTokens> {
       currency: "XRP",
       issuer: null,
       balance: String(xrp),
+      available: String(Math.max(xrp - reserveFor(info, res[2]), 0)),
       label: "XRP",
     });
   }

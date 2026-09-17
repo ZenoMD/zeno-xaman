@@ -319,7 +319,7 @@ async function deriveShieldedAccount(
   const sub = await xumm.payload!.createAndSubscribe(
     {
       txjson: { TransactionType: "SignIn" },
-      custom_meta: { instruction: "Sign in to shielded account" },
+      custom_meta: { instruction: "Unlock shielded account" },
     },
     // The socket emits several messages (opened, expiry ticks, …); `signed` is
     // only present on the FINAL outcome. Resolve on that, for both true & false.

@@ -41,6 +41,13 @@ export type XrplToken = {
   /** On-ledger currency code (present for issued currencies, used for Payments). */
   rawCurrency?: string;
   balance: string;
+  /**
+   * What's actually spendable — `balance` minus the XRPL reserve locked up by
+   * the account (base reserve + owner reserve for its trustlines/objects).
+   * Only set for XRP; issued currencies have no reserve of their own, so
+   * consumers should fall back to `balance` when this is absent.
+   */
+  available?: string;
   label: string;
   // Whether the Axelar bridge can accept this asset for shielding (must hold a TrustLine)
   supported?: boolean;
