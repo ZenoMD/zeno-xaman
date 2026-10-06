@@ -112,7 +112,7 @@ export function useWallet(): UseWalletState {
           console.error(err);
           const e = err as Error;
           setError(e);
-          log(`FATAL: ${e && e.stack ? e.stack : String(err)}`);
+          log(`FATAL: ${describeError(err)}`);
         });
     };
 
@@ -185,7 +185,7 @@ export function useWallet(): UseWalletState {
           const e = err as Error;
           setError(e);
           setNeedsSignIn(true);
-          log(`FATAL: ${e && e.stack ? e.stack : String(err)}`);
+          log(`FATAL: ${describeError(err)}`);
         });
     }
 
@@ -211,4 +211,10 @@ export function useWallet(): UseWalletState {
     needsSignIn,
     signIn,
   };
+}
+
+function describeError(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const cause = err.cause instanceof Error ? ` (cause: ${err.cause.message})` : "";
+  return `${err.name}: ${err.message}${cause}${err.stack ? `\n${err.stack}` : ""}`;
 }
