@@ -1,6 +1,7 @@
 import {
   startRailgunEngine,
   loadProvider,
+  unloadProvider,
   createRailgunWallet,
   getProver,
   refreshBalances,
@@ -43,6 +44,8 @@ export type ScanUpdate = {
 
 const POI_NODE_URLS = ["https://poi.railgun.org"];
 const TXID = TXIDVersion.V2_PoseidonMerkle;
+// Boot-time provider load: 3 tries with 1s then 2s backoff between them.
+const PROVIDER_LOAD_ATTEMPTS = 3;
 
 export const XRPL_EVM_NETWORK = "XRPL_EVM" as NetworkName;
 (NetworkName as Record<string, string>).XRPLEVM = XRPL_EVM_NETWORK;
@@ -105,18 +108,19 @@ const NETWORKS: Record<string, NetworkProviders> = {
   },
   [XRPL_EVM_NETWORK]: {
     chainId: 1440000,
-    // Only one public RPC, so weight 2 to clear the fallback quorum (the engine
-    // requires total provider weight >= 2).
+    // ethers sets quorum = ceil(totalWeight / 2), so with two weight-2 RPCs the
+    // quorum is 2 and either one can answer alone (the engine also requires
+    // total weight >= 2).
     providers: [
       {
         provider: "https://json-rpc.xrpl.cumulo.org.es",
         priority: 1,
-        weight: 1,
+        weight: 2,
       },
       {
         provider: "https://rpc.xrplevm.org",
         priority: 2,
-        weight: 1,
+        weight: 2,
       },
     ],
   },
@@ -367,12 +371,28 @@ export async function initRailgun(
   }
 
   const net = NETWORKS[networkName];
-  log(`Loading provider (${networkName})…`);
-  await loadProvider(
-    { chainId: net.chainId, providers: net.providers },
-    networkName,
-    15000,
-  );
+  // A single RPC error fails the whole load: ethers' FallbackProvider only fails
+  // over on a stall, and an error from either RPC already meets quorum. So retry
+  // the load itself, unloading in between so the next attempt builds fresh
+  // providers rather than reusing a polling provider bound to the failed one.
+  for (let attempt = 1; ; attempt++) {
+    log(`Loading provider (${networkName})…`);
+    try {
+      await loadProvider(
+        { chainId: net.chainId, providers: net.providers },
+        networkName,
+        15000,
+      );
+      break;
+    } catch (e) {
+      if (attempt >= PROVIDER_LOAD_ATTEMPTS) throw e;
+      log(
+        `provider load failed (attempt ${attempt}/${PROVIDER_LOAD_ATTEMPTS}): ${(e as Error)?.message ?? String(e)}; retrying…`,
+      );
+      await unloadProvider(networkName).catch(() => {});
+      await new Promise((r) => setTimeout(r, 1000 * 2 ** (attempt - 1)));
+    }
+  }
 
   log("Creating RAILGUN wallet…");
   const wallet = await createRailgunWallet(encryptionKey, mnemonic, undefined);
