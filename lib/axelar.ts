@@ -111,6 +111,9 @@ export async function shieldViaAxelar(
   const sub = await xumm.payload!.createAndSubscribe(
     {
       txjson,
+      // Never sign a shield off mainnet, even if the user switched networks
+      // after unlocking.
+      options: { force_network: "MAINNET" },
       custom_meta: {
         instruction: `Shield ${amount} ${token.currency} to the EVM sidechain via Axelar`,
       },
