@@ -319,6 +319,10 @@ async function deriveShieldedAccount(
   const sub = await xumm.payload!.createAndSubscribe(
     {
       txjson: { TransactionType: "SignIn" },
+      // Mainnet only. This is the first request at boot, so on any other
+      // network Xaman prompts the switch here, and the wallet cannot start
+      // until the user does.
+      options: { force_network: "MAINNET" },
       custom_meta: { instruction: "Unlock shielded account" },
     },
     // The socket emits several messages (opened, expiry ticks, …); `signed` is

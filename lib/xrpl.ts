@@ -195,13 +195,17 @@ async function connectedAccount(): Promise<{
     }
   }
 
-  const [account, endpoint] = await Promise.all([
+  const [account, endpoint, networkType] = await Promise.all([
     xumm.user.account,
     xumm.user.networkEndpoint,
+    xumm.user.networkType,
   ]);
   if (!account) throw new Error("No XRPL account connected");
 
-  return { account, endpoint };
+  // Mainnet only. The session's network is the one Xaman launched on, so after
+  // the unlock prompts a switch off testnet, its endpoint still points at
+  // testnet. Read from the public mainnet cluster in that case.
+  return { account, endpoint: networkType === "MAINNET" ? endpoint : null };
 }
 
 /**
